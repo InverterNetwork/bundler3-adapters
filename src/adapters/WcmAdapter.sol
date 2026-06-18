@@ -18,6 +18,12 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     /// @notice The World Markets / WCM SwapRouter.
     IWcmSwapRouter public immutable ROUTER;
 
+    /// @notice The chain id supported by this adapter deployment.
+    uint256 public immutable CHAIN_ID;
+
+    /// @notice The expected runtime code hash of the World Markets / WCM SwapRouter.
+    bytes32 public immutable ROUTER_CODE_HASH;
+
     /// @notice The USDm token supported by this adapter deployment.
     address public immutable USDM;
 
@@ -43,6 +49,8 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     /// @param bundler3 The address of the Bundler3 contract.
     /// @param morpho The address of the Morpho protocol.
     /// @param router The address of the World Markets / WCM SwapRouter.
+    /// @param chainId The chain id supported by this adapter deployment.
+    /// @param routerCodeHash The expected runtime code hash of the World Markets / WCM SwapRouter.
     /// @param usdm The USDm token supported by this adapter deployment.
     /// @param witry The wiTRY token supported by this adapter deployment.
     /// @param marketOracle The oracle of the supported Morpho market.
@@ -52,6 +60,8 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         address bundler3,
         address morpho,
         address router,
+        uint256 chainId,
+        bytes32 routerCodeHash,
         address usdm,
         address witry,
         address marketOracle,
@@ -60,6 +70,8 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     ) CoreAdapter(bundler3) {
         require(morpho != address(0), ErrorsLib.ZeroAddress());
         require(router != address(0), ErrorsLib.ZeroAddress());
+        require(chainId != 0, ErrorsLib.ZeroAmount());
+        require(routerCodeHash != bytes32(0), ErrorsLib.ZeroAmount());
         require(usdm != address(0), ErrorsLib.ZeroAddress());
         require(witry != address(0), ErrorsLib.ZeroAddress());
         require(marketOracle != address(0), ErrorsLib.ZeroAddress());
@@ -69,6 +81,8 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
 
         MORPHO = IMorpho(morpho);
         ROUTER = IWcmSwapRouter(router);
+        CHAIN_ID = chainId;
+        ROUTER_CODE_HASH = routerCodeHash;
         USDM = usdm;
         WITRY = witry;
         MARKET_ORACLE = marketOracle;
@@ -124,12 +138,13 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         require(amountOut != 0, ErrorsLib.ZeroAmount());
         require(maxAmountIn != 0, ErrorsLib.ZeroAmount());
 
-        _swapExactOut(tokenIn, tokenOut, amountOut, maxAmountIn, receiver, deadline);
+        _swapExactOut(tokenIn, tokenOut, amountOut, maxAmountIn, receiver, receiver, deadline);
     }
 
     /// @notice Buys an amount corresponding to a user's Morpho debt.
-    /// @dev The bought loan token is forwarded to `receiver`, usually `GeneralAdapter1`. `onBehalf` must be the
-    /// Bundler3 initiator, and `marketParams` must match the market pinned at deployment.
+    /// @dev The bought loan token is forwarded to `receiver`, usually `GeneralAdapter1`. Unspent `tokenIn` is refunded
+    /// to `onBehalf`. `onBehalf` must be the Bundler3 initiator, and `marketParams` must match the market pinned at
+    /// deployment.
     /// @param tokenIn Token to sell.
     /// @param marketParams Market parameters of the market with Morpho debt.
     /// @param maxAmountIn Maximum acceptable input amount.
@@ -153,7 +168,7 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         require(debtAmount != 0, ErrorsLib.ZeroAmount());
 
         uint256 amountOut = _roundUpToUsdmWorldTick(debtAmount);
-        _swapExactOut(tokenIn, marketParams.loanToken, amountOut, maxAmountIn, receiver, deadline);
+        _swapExactOut(tokenIn, marketParams.loanToken, amountOut, maxAmountIn, receiver, onBehalf, deadline);
     }
 
     /* INTERNAL FUNCTIONS */
@@ -204,9 +219,12 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         uint256 amountOut,
         uint256 maxAmountIn,
         address receiver,
+        address refundReceiver,
         uint256 deadline
     ) internal returns (uint256 spent, uint256 received) {
         _validateSwap(tokenIn, tokenOut, receiver, deadline);
+        require(refundReceiver != address(0), ErrorsLib.ZeroAddress());
+        require(refundReceiver != address(this), ErrorsLib.AdapterAddress());
 
         uint256 tokenInBefore = IERC20(tokenIn).balanceOf(address(this));
         uint256 tokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
@@ -240,11 +258,13 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         uint256 unspentAllowance = maxAmountIn - spent;
         if (unspentAllowance != 0) {
             uint256 refund = tokenInAfter < unspentAllowance ? tokenInAfter : unspentAllowance;
-            if (refund != 0) SafeERC20.safeTransfer(IERC20(tokenIn), receiver, refund);
+            if (refund != 0) SafeERC20.safeTransfer(IERC20(tokenIn), refundReceiver, refund);
         }
     }
 
     function _validateSwap(address tokenIn, address tokenOut, address receiver, uint256 deadline) internal view {
+        require(block.chainid == CHAIN_ID, ErrorsLib.InvalidChainId());
+        require(address(ROUTER).codehash == ROUTER_CODE_HASH, ErrorsLib.InvalidWcmRouter());
         require(
             (tokenIn == USDM && tokenOut == WITRY) || (tokenIn == WITRY && tokenOut == USDM), ErrorsLib.InvalidWcmPair()
         );

@@ -110,15 +110,20 @@ Deploy `WcmAdapter` with constructor arguments:
 bundler3 = 0xf53D4c8f0f83F697CD6bB303567400cCf411aA63
 morpho   = 0x18120312A7cf44DcfEc6dCe5632a431579ED9100
 router   = 0x94b6706fa26a4f3dcf501ff25e1e4628b75adc69
+chainId  = 4326
+routerCodeHash = 0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66
 usdm     = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7
 witry    = 0x15B271D9012b5820FC42b1c495B4C1e206547De5
 ```
 
 After deployment, verify these immutables on-chain:
 
+- `WCM_ADAPTER_ADDRESS.codehash == WCM_ADAPTER_CODE_HASH`
 - `BUNDLER3`
 - `MORPHO`
 - `ROUTER`
+- `CHAIN_ID == 4326`
+- `ROUTER_CODE_HASH == 0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66`
 - `ROUTER.codehash == 0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66`
 - `USDM`
 - `WITRY`
@@ -132,7 +137,13 @@ the live script must verify:
 - `block.chainid == 4326`
 - World router bytecode hash matches the pinned hash above
 - `WCM_ADAPTER_ADDRESS` has contract code
+- `WCM_ADAPTER_ADDRESS.codehash` matches `WCM_ADAPTER_CODE_HASH`
 - all adapter immutables match the constants above
+
+`WcmDeployLive` prints the deployed adapter code hash. Record that value in the
+proof ledger and pass it as `WCM_ADAPTER_CODE_HASH` for every later live script
+run. Do not derive this hash from the candidate adapter address in the same
+command that moves funds.
 
 ## Required Pre-Authorizations
 
@@ -294,11 +305,11 @@ Preferred low-risk live shape:
 6. `GeneralAdapter1.morphoWithdrawCollateral(marketParams, type(uint256).max, borrower)`
 7. sweep any remaining WCM adapter and GeneralAdapter1 balances
 
-`buyMorphoDebt` now requires `onBehalf == Bundler3.initiator()`, so this bundle
-must be sent by the borrower or by the exact account that owns the Morpho debt.
-The WCM adapter refunds exact-output source-token remainder to `receiver`, so a
-close bundle that uses `receiver = GeneralAdapter1` must sweep GeneralAdapter1
-wiTRY as well as WCM adapter wiTRY.
+`buyMorphoDebt` requires `onBehalf == Bundler3.initiator()`, so this bundle must
+be sent by the borrower or by the exact account that owns the Morpho debt. The
+WCM adapter forwards bought USDm to `receiver` but refunds exact-output
+source-token remainder to `onBehalf`, so the close bundle must still sweep
+GeneralAdapter1 USDm surplus and any explicit adapter dust.
 
 This close path intentionally uses the borrower's free wiTRY as the temporary
 funding source. It avoids adding Morpho flashloan mechanics to the required live

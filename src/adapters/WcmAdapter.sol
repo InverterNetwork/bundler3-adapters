@@ -24,6 +24,15 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     /// @notice The wiTRY token supported by this adapter deployment.
     address public immutable WITRY;
 
+    /// @notice The oracle of the Morpho market supported by `buyMorphoDebt`.
+    address public immutable MARKET_ORACLE;
+
+    /// @notice The IRM of the Morpho market supported by `buyMorphoDebt`.
+    address public immutable MARKET_IRM;
+
+    /// @notice The LLTV of the Morpho market supported by `buyMorphoDebt`.
+    uint256 public immutable MARKET_LLTV;
+
     /* CONSTANTS */
 
     /// @dev USDm has 4 World position decimals and 18 ERC-20 decimals.
@@ -36,17 +45,35 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     /// @param router The address of the World Markets / WCM SwapRouter.
     /// @param usdm The USDm token supported by this adapter deployment.
     /// @param witry The wiTRY token supported by this adapter deployment.
-    constructor(address bundler3, address morpho, address router, address usdm, address witry) CoreAdapter(bundler3) {
+    /// @param marketOracle The oracle of the supported Morpho market.
+    /// @param marketIrm The IRM of the supported Morpho market.
+    /// @param marketLltv The LLTV of the supported Morpho market.
+    constructor(
+        address bundler3,
+        address morpho,
+        address router,
+        address usdm,
+        address witry,
+        address marketOracle,
+        address marketIrm,
+        uint256 marketLltv
+    ) CoreAdapter(bundler3) {
         require(morpho != address(0), ErrorsLib.ZeroAddress());
         require(router != address(0), ErrorsLib.ZeroAddress());
         require(usdm != address(0), ErrorsLib.ZeroAddress());
         require(witry != address(0), ErrorsLib.ZeroAddress());
+        require(marketOracle != address(0), ErrorsLib.ZeroAddress());
+        require(marketIrm != address(0), ErrorsLib.ZeroAddress());
+        require(marketLltv != 0, ErrorsLib.ZeroAmount());
         require(usdm != witry, ErrorsLib.InvalidWcmPair());
 
         MORPHO = IMorpho(morpho);
         ROUTER = IWcmSwapRouter(router);
         USDM = usdm;
         WITRY = witry;
+        MARKET_ORACLE = marketOracle;
+        MARKET_IRM = marketIrm;
+        MARKET_LLTV = marketLltv;
     }
 
     /* SWAP ACTIONS */
@@ -78,7 +105,8 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     }
 
     /// @notice Buys an exact output amount through WCM.
-    /// @dev Tokens must have been sent to the adapter before this call.
+    /// @dev Tokens must have been sent to the adapter before this call. If more `tokenIn` than needed is present,
+    /// up to the unspent `maxAmountIn` remainder is refunded to `receiver`.
     /// @param tokenIn Token to sell.
     /// @param tokenOut Token to buy.
     /// @param amountOut Exact output amount to buy.
@@ -100,7 +128,8 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     }
 
     /// @notice Buys an amount corresponding to a user's Morpho debt.
-    /// @dev The bought loan token is forwarded to `receiver`, usually `GeneralAdapter1`.
+    /// @dev The bought loan token is forwarded to `receiver`, usually `GeneralAdapter1`. `onBehalf` must be the
+    /// Bundler3 initiator, and `marketParams` must match the market pinned at deployment.
     /// @param tokenIn Token to sell.
     /// @param marketParams Market parameters of the market with Morpho debt.
     /// @param maxAmountIn Maximum acceptable input amount.
@@ -117,7 +146,8 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     ) external onlyBundler3 {
         require(maxAmountIn != 0, ErrorsLib.ZeroAmount());
         require(onBehalf != address(0), ErrorsLib.ZeroAddress());
-        require(marketParams.loanToken == USDM && marketParams.collateralToken == WITRY, ErrorsLib.InvalidWcmPair());
+        require(onBehalf == initiator(), ErrorsLib.UnexpectedOwner());
+        _validateMarket(marketParams);
 
         uint256 debtAmount = MorphoBalancesLib.expectedBorrowAssets(MORPHO, marketParams, onBehalf);
         require(debtAmount != 0, ErrorsLib.ZeroAmount());
@@ -162,6 +192,7 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         received = IERC20(tokenOut).balanceOf(address(this)) - tokenOutBefore;
 
         require(spent <= amountIn, ErrorsLib.SellAmountTooHigh());
+        require(spent == amountIn, ErrorsLib.SellAmountTooLow());
         require(received >= minAmountOut, ErrorsLib.BuyAmountTooLow());
 
         SafeERC20.safeTransfer(IERC20(tokenOut), receiver, received);
@@ -197,13 +228,20 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
 
         SafeERC20.forceApprove(IERC20(tokenIn), address(ROUTER), 0);
 
-        spent = tokenInBefore - IERC20(tokenIn).balanceOf(address(this));
+        uint256 tokenInAfter = IERC20(tokenIn).balanceOf(address(this));
+        spent = tokenInBefore - tokenInAfter;
         received = IERC20(tokenOut).balanceOf(address(this)) - tokenOutBefore;
 
         require(spent <= maxAmountIn, ErrorsLib.SellAmountTooHigh());
         require(received >= amountOut, ErrorsLib.BuyAmountTooLow());
 
         SafeERC20.safeTransfer(IERC20(tokenOut), receiver, received);
+
+        uint256 unspentAllowance = maxAmountIn - spent;
+        if (unspentAllowance != 0) {
+            uint256 refund = tokenInAfter < unspentAllowance ? tokenInAfter : unspentAllowance;
+            if (refund != 0) SafeERC20.safeTransfer(IERC20(tokenIn), receiver, refund);
+        }
     }
 
     function _validateSwap(address tokenIn, address tokenOut, address receiver, uint256 deadline) internal view {
@@ -213,6 +251,14 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         require(receiver != address(0), ErrorsLib.ZeroAddress());
         require(receiver != address(this), ErrorsLib.AdapterAddress());
         require(deadline >= block.timestamp, ErrorsLib.DeadlineExpired());
+    }
+
+    function _validateMarket(MarketParams calldata marketParams) internal view {
+        require(marketParams.loanToken == USDM && marketParams.collateralToken == WITRY, ErrorsLib.InvalidWcmPair());
+        require(
+            marketParams.oracle == MARKET_ORACLE && marketParams.irm == MARKET_IRM && marketParams.lltv == MARKET_LLTV,
+            ErrorsLib.InvalidMorphoMarket()
+        );
     }
 
     function _roundUpToUsdmWorldTick(uint256 amount) internal pure returns (uint256) {

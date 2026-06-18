@@ -8,6 +8,7 @@ import {IWcmAdapter} from "../../src/interfaces/IWcmAdapter.sol";
 import {Bundler3, Call} from "../../src/Bundler3.sol";
 
 import {IMorpho, MarketParams} from "../../lib/morpho-blue/src/interfaces/IMorpho.sol";
+import {MarketParamsLib} from "../../lib/morpho-blue/src/libraries/MarketParamsLib.sol";
 import {MorphoBalancesLib} from "../../lib/morpho-blue/src/libraries/periphery/MorphoBalancesLib.sol";
 import {IERC20} from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -15,6 +16,7 @@ import {Test} from "../../lib/forge-std/src/Test.sol";
 
 contract WcmAdapterForkTest is Test {
     using SafeERC20 for IERC20;
+    using MarketParamsLib for MarketParams;
 
     address internal constant MORPHO = 0x18120312A7cf44DcfEc6dCe5632a431579ED9100;
     address internal constant WORLD_SWAP_ROUTER = 0x94b6706FA26a4F3DCF501Ff25E1e4628B75AdC69;
@@ -22,8 +24,11 @@ contract WcmAdapterForkTest is Test {
     address internal constant WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
     address internal constant ORACLE = 0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22;
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
+    bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
+        0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
 
     uint256 internal constant LLTV = 770000000000000000;
+    uint256 internal constant MEGAETH_CHAIN_ID = 4326;
     uint256 internal constant FORK_BLOCK = 18_981_853;
     uint256 internal constant USDM_WORLD_TICK = 1e14;
 
@@ -38,10 +43,23 @@ contract WcmAdapterForkTest is Test {
 
     function setUp() public {
         vm.createSelectFork(vm.envString("RPC_URL_4326"), FORK_BLOCK);
+        assertEq(block.chainid, MEGAETH_CHAIN_ID, "chain id");
+        assertEq(WORLD_SWAP_ROUTER.codehash, WORLD_SWAP_ROUTER_CODE_HASH, "router codehash");
 
         bundler3 = new Bundler3();
         generalAdapter1 = new GeneralAdapter1(address(bundler3), MORPHO, address(1));
-        wcmAdapter = new WcmAdapter(address(bundler3), MORPHO, WORLD_SWAP_ROUTER, USDM, WITRY, ORACLE, IRM, LLTV);
+        wcmAdapter = new WcmAdapter(
+            address(bundler3),
+            MORPHO,
+            WORLD_SWAP_ROUTER,
+            MEGAETH_CHAIN_ID,
+            WORLD_SWAP_ROUTER_CODE_HASH,
+            USDM,
+            WITRY,
+            ORACLE,
+            IRM,
+            LLTV
+        );
 
         marketParams = MarketParams({loanToken: USDM, collateralToken: WITRY, oracle: ORACLE, irm: IRM, lltv: LLTV});
     }
@@ -118,17 +136,19 @@ contract WcmAdapterForkTest is Test {
         uint256 maxAmountIn = 700e18;
         deal(WITRY, address(wcmAdapter), maxAmountIn);
 
-        Call[] memory calls = new Call[](5);
+        Call[] memory calls = new Call[](6);
         calls[0] = _wcmBuyMorphoDebt(WITRY, marketParams, maxAmountIn, borrower, address(generalAdapter1));
         calls[1] = _morphoRepay(0, type(uint256).max, borrower);
         calls[2] = _erc20Transfer(generalAdapter1, USDM, receiver, type(uint256).max);
-        calls[3] = _erc20Transfer(wcmAdapter, WITRY, receiver, type(uint256).max);
-        calls[4] = _erc20Transfer(generalAdapter1, WITRY, receiver, type(uint256).max);
+        calls[3] = _morphoWithdrawAllCollateral(receiver);
+        calls[4] = _erc20Transfer(wcmAdapter, WITRY, receiver, type(uint256).max);
+        calls[5] = _erc20Transfer(generalAdapter1, WITRY, receiver, type(uint256).max);
         vm.prank(borrower);
         bundler3.multicall(calls);
 
         uint256 debtAfter = MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams, borrower);
         assertEq(debtAfter, 0, "remaining debt");
+        assertEq(IMorpho(MORPHO).position(marketParams.id(), borrower).collateral, 0, "remaining collateral");
         assertEq(IERC20(USDM).balanceOf(address(wcmAdapter)), 0, "adapter USDm");
         assertEq(IERC20(WITRY).balanceOf(address(wcmAdapter)), 0, "adapter wiTRY");
         assertEq(IERC20(USDM).balanceOf(address(generalAdapter1)), 0, "general adapter USDm");
@@ -166,6 +186,7 @@ contract WcmAdapterForkTest is Test {
         deal(WITRY, borrower, 1000e18);
         vm.startPrank(borrower);
         IERC20(WITRY).forceApprove(MORPHO, 1000e18);
+        IMorpho(MORPHO).setAuthorization(address(generalAdapter1), true);
         IMorpho(MORPHO).supplyCollateral(marketParams, 1000e18, borrower, hex"");
         IMorpho(MORPHO).borrow(marketParams, 12e18, 0, borrower, borrower);
         vm.stopPrank();
@@ -193,6 +214,13 @@ contract WcmAdapterForkTest is Test {
             abi.encodeCall(
                 GeneralAdapter1.morphoRepay, (marketParams, assets, shares, type(uint256).max, onBehalf, hex"")
             )
+        );
+    }
+
+    function _morphoWithdrawAllCollateral(address to) internal view returns (Call memory) {
+        return _call(
+            generalAdapter1,
+            abi.encodeCall(GeneralAdapter1.morphoWithdrawCollateral, (marketParams, type(uint256).max, to))
         );
     }
 

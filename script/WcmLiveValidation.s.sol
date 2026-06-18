@@ -62,7 +62,7 @@ abstract contract WcmLiveBase is Script {
         _requireMegaEth();
         adapter = vm.envAddress("WCM_ADAPTER_ADDRESS");
         require(adapter != address(0), "missing WCM_ADAPTER_ADDRESS");
-        _validateWcmAdapter(adapter);
+        _validateWcmAdapter(adapter, _wcmAdapterCodeHash());
     }
 
     function _slippageBps() internal view returns (uint256) {
@@ -159,13 +159,24 @@ abstract contract WcmLiveBase is Script {
         require(WORLD_SWAP_ROUTER.codehash == WORLD_SWAP_ROUTER_CODE_HASH, "wrong router codehash");
     }
 
-    function _validateWcmAdapter(address adapter) internal view {
-        require(adapter.code.length != 0, "wcm adapter has no code");
+    function _wcmAdapterCodeHash() internal view returns (bytes32) {
+        return vm.envBytes32("WCM_ADAPTER_CODE_HASH");
+    }
 
+    function _validateWcmAdapter(address adapter, bytes32 expectedCodeHash) internal view {
+        require(adapter.code.length != 0, "wcm adapter has no code");
+        require(adapter.codehash == expectedCodeHash, "wrong adapter codehash");
+
+        _validateWcmAdapterImmutables(adapter);
+    }
+
+    function _validateWcmAdapterImmutables(address adapter) internal view {
         WcmAdapter wcmAdapter = WcmAdapter(payable(adapter));
         require(wcmAdapter.BUNDLER3() == BUNDLER3, "wrong adapter bundler");
         require(address(wcmAdapter.MORPHO()) == MORPHO, "wrong adapter morpho");
         require(address(wcmAdapter.ROUTER()) == WORLD_SWAP_ROUTER, "wrong adapter router");
+        require(wcmAdapter.CHAIN_ID() == MEGAETH_CHAIN_ID, "wrong adapter chainid");
+        require(wcmAdapter.ROUTER_CODE_HASH() == WORLD_SWAP_ROUTER_CODE_HASH, "wrong adapter router codehash");
         require(wcmAdapter.USDM() == USDM, "wrong adapter usdm");
         require(wcmAdapter.WITRY() == WITRY, "wrong adapter witry");
         require(wcmAdapter.MARKET_ORACLE() == ORACLE, "wrong adapter oracle");
@@ -349,12 +360,25 @@ contract WcmDeployLive is WcmLiveBase {
         _requireMegaEth();
         uint256 pk = _borrowerPk();
         vm.startBroadcast(pk);
-        WcmAdapter adapter = new WcmAdapter(BUNDLER3, MORPHO, WORLD_SWAP_ROUTER, USDM, WITRY, ORACLE, IRM, LLTV);
+        WcmAdapter adapter = new WcmAdapter(
+            BUNDLER3,
+            MORPHO,
+            WORLD_SWAP_ROUTER,
+            MEGAETH_CHAIN_ID,
+            WORLD_SWAP_ROUTER_CODE_HASH,
+            USDM,
+            WITRY,
+            ORACLE,
+            IRM,
+            LLTV
+        );
         deployed = address(adapter);
         vm.stopBroadcast();
 
         console2.log("WCM adapter deployed", deployed);
-        _validateWcmAdapter(deployed);
+        console2.log("WCM adapter codehash");
+        console2.logBytes32(deployed.codehash);
+        _validateWcmAdapterImmutables(deployed);
     }
 }
 

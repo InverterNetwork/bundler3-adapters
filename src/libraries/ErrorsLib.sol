@@ -82,6 +82,12 @@ library ErrorsLib {
     /// @dev Thrown when WCM Morpho debt is requested for an unsupported market.
     error InvalidMorphoMarket();
 
+    /// @dev Thrown when a WCM adapter is used on an unsupported chain.
+    error InvalidChainId();
+
+    /// @dev Thrown when the configured WCM router code hash does not match.
+    error InvalidWcmRouter();
+
     /// @dev Thrown when a WCM swap deadline has passed.
     error DeadlineExpired();
 }

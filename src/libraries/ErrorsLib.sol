@@ -70,4 +70,12 @@ library ErrorsLib {
 
     /// @dev Thrown when a swap has not bought enough destination tokens.
     error BuyAmountTooLow();
+
+    /* WCM ADAPTER */
+
+    /// @dev Thrown when a WCM swap is attempted on an unsupported token pair.
+    error InvalidWcmPair();
+
+    /// @dev Thrown when a WCM swap deadline has passed.
+    error DeadlineExpired();
 }

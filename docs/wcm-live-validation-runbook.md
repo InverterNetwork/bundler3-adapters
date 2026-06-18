@@ -119,8 +119,20 @@ After deployment, verify these immutables on-chain:
 - `BUNDLER3`
 - `MORPHO`
 - `ROUTER`
+- `ROUTER.codehash == 0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66`
 - `USDM`
 - `WITRY`
+- `MARKET_ORACLE`
+- `MARKET_IRM`
+- `MARKET_LLTV`
+
+Before any transaction that transfers borrower funds to `WCM_ADAPTER_ADDRESS`,
+the live script must verify:
+
+- `block.chainid == 4326`
+- World router bytecode hash matches the pinned hash above
+- `WCM_ADAPTER_ADDRESS` has contract code
+- all adapter immutables match the constants above
 
 ## Required Pre-Authorizations
 
@@ -138,8 +150,9 @@ USDm allowance borrower -> GeneralAdapter1
 wiTRY allowance borrower -> GeneralAdapter1
 ```
 
-Use exact allowances where practical. If a max allowance is used for execution
-convenience, document it explicitly in the proof ledger.
+Use exact allowances by default. The live script only uses max allowances when
+`WCM_ALLOW_MAX_APPROVALS=1` is explicitly set; if a max allowance is used for
+execution convenience, document it explicitly in the proof ledger.
 
 No standing approval should remain from WCM adapter to World router after a swap.
 This is a validation condition after each adapter call.
@@ -158,7 +171,8 @@ Recommended default live bounds:
 - start with quote plus/minus `2-3%`
 - widen only if the latest quote still supports the intended flow and the amount
   is within the available account balances
-- keep deadlines short, around `now + 10 minutes`
+- keep deadlines short; the live script defaults to `now + 2 minutes` and rejects
+  `WCM_DEADLINE_TTL` values above 5 minutes
 
 The exact final amounts should be chosen from the live quote, not hardcoded from
 the fork test.
@@ -212,12 +226,13 @@ Recommended shape:
 
 1. `GeneralAdapter1.erc20TransferFrom(USDm, WcmAdapter, maxAmountIn)`
 2. `WcmAdapter.buy(USDm, wiTRY, amountOut, maxAmountIn, borrower, deadline)`
-3. `WcmAdapter.erc20Transfer(USDm, borrower, type(uint256).max)`
+3. `WcmAdapter.erc20Transfer(USDm, borrower, type(uint256).max)` as a final
+   zero-balance cleanup assertion
 
 Suggested starting size:
 
 ```text
-amountOut: 1 wiTRY
+amountOut: 600 wiTRY
 ```
 
 Adjust from live World quote if needed.
@@ -225,7 +240,7 @@ Adjust from live World quote if needed.
 Validation:
 
 - borrower receives at least exact `amountOut` wiTRY
-- any unused USDm is swept back to borrower
+- any unused USDm is refunded or swept back to borrower
 - WCM adapter USDm balance is zero
 - WCM adapter wiTRY balance is zero
 - WCM adapter router allowance for USDm is zero
@@ -278,6 +293,12 @@ Preferred low-risk live shape:
 5. `GeneralAdapter1.erc20Transfer(USDm, borrower, type(uint256).max)`
 6. `GeneralAdapter1.morphoWithdrawCollateral(marketParams, type(uint256).max, borrower)`
 7. sweep any remaining WCM adapter and GeneralAdapter1 balances
+
+`buyMorphoDebt` now requires `onBehalf == Bundler3.initiator()`, so this bundle
+must be sent by the borrower or by the exact account that owns the Morpho debt.
+The WCM adapter refunds exact-output source-token remainder to `receiver`, so a
+close bundle that uses `receiver = GeneralAdapter1` must sweep GeneralAdapter1
+wiTRY as well as WCM adapter wiTRY.
 
 This close path intentionally uses the borrower's free wiTRY as the temporary
 funding source. It avoids adding Morpho flashloan mechanics to the required live
@@ -471,6 +492,7 @@ Final check at block 18997778:
 
 Do not broadcast the next live transaction if any of these are true:
 
+- chain id or WCM adapter immutable validation fails
 - latest World quote is missing, stale, or worse than the chosen bound
 - expected adapter balance after a step is non-zero and cannot be explained
 - WCM adapter router allowance remains non-zero after a swap

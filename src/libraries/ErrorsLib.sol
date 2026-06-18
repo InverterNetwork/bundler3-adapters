@@ -68,6 +68,9 @@ library ErrorsLib {
     /// @dev Thrown when a swap has spent too many source tokens.
     error SellAmountTooHigh();
 
+    /// @dev Thrown when a swap has spent too few source tokens.
+    error SellAmountTooLow();
+
     /// @dev Thrown when a swap has not bought enough destination tokens.
     error BuyAmountTooLow();
 
@@ -75,6 +78,9 @@ library ErrorsLib {
 
     /// @dev Thrown when a WCM swap is attempted on an unsupported token pair.
     error InvalidWcmPair();
+
+    /// @dev Thrown when WCM Morpho debt is requested for an unsupported market.
+    error InvalidMorphoMarket();
 
     /// @dev Thrown when a WCM swap deadline has passed.
     error DeadlineExpired();

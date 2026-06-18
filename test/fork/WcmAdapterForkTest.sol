@@ -41,7 +41,7 @@ contract WcmAdapterForkTest is Test {
 
         bundler3 = new Bundler3();
         generalAdapter1 = new GeneralAdapter1(address(bundler3), MORPHO, address(1));
-        wcmAdapter = new WcmAdapter(address(bundler3), MORPHO, WORLD_SWAP_ROUTER, USDM, WITRY);
+        wcmAdapter = new WcmAdapter(address(bundler3), MORPHO, WORLD_SWAP_ROUTER, USDM, WITRY, ORACLE, IRM, LLTV);
 
         marketParams = MarketParams({loanToken: USDM, collateralToken: WITRY, oracle: ORACLE, irm: IRM, lltv: LLTV});
     }
@@ -102,6 +102,7 @@ contract WcmAdapterForkTest is Test {
         Call[] memory calls = new Call[](2);
         calls[0] = _wcmBuyMorphoDebt(WITRY, marketParams, maxAmountIn, borrower, receiver);
         calls[1] = _erc20Transfer(wcmAdapter, WITRY, receiver, type(uint256).max);
+        vm.prank(borrower);
         bundler3.multicall(calls);
 
         uint256 received = IERC20(USDM).balanceOf(receiver) - receiverBefore;
@@ -117,11 +118,13 @@ contract WcmAdapterForkTest is Test {
         uint256 maxAmountIn = 700e18;
         deal(WITRY, address(wcmAdapter), maxAmountIn);
 
-        Call[] memory calls = new Call[](4);
+        Call[] memory calls = new Call[](5);
         calls[0] = _wcmBuyMorphoDebt(WITRY, marketParams, maxAmountIn, borrower, address(generalAdapter1));
         calls[1] = _morphoRepay(0, type(uint256).max, borrower);
         calls[2] = _erc20Transfer(generalAdapter1, USDM, receiver, type(uint256).max);
         calls[3] = _erc20Transfer(wcmAdapter, WITRY, receiver, type(uint256).max);
+        calls[4] = _erc20Transfer(generalAdapter1, WITRY, receiver, type(uint256).max);
+        vm.prank(borrower);
         bundler3.multicall(calls);
 
         uint256 debtAfter = MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams, borrower);
@@ -129,6 +132,7 @@ contract WcmAdapterForkTest is Test {
         assertEq(IERC20(USDM).balanceOf(address(wcmAdapter)), 0, "adapter USDm");
         assertEq(IERC20(WITRY).balanceOf(address(wcmAdapter)), 0, "adapter wiTRY");
         assertEq(IERC20(USDM).balanceOf(address(generalAdapter1)), 0, "general adapter USDm");
+        assertEq(IERC20(WITRY).balanceOf(address(generalAdapter1)), 0, "general adapter wiTRY");
         assertEq(IERC20(WITRY).allowance(address(wcmAdapter), WORLD_SWAP_ROUTER), 0, "router allowance");
     }
 

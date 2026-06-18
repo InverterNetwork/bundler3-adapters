@@ -48,9 +48,9 @@ agent with the fork-test verification target above.
    - V1 should not support arbitrary World-listed base-token pairs.
 
 2. Lock constructor configuration.
-   - Decision: use immutable `bundler3`, `morpho`, `router`, `usdm`, and
-     `witry` addresses.
-   - Use one adapter deployment per chain/router.
+   - Decision: use immutable `bundler3`, `morpho`, `router`, `usdm`, `witry`,
+     `marketOracle`, `marketIrm`, and `marketLltv` values.
+   - Use one adapter deployment per chain/router/reference Morpho market.
 
 3. Lock exact interface names and parameters.
    - Decision: expose `sell`, `buy`, and `buyMorphoDebt` as defined below.
@@ -192,6 +192,9 @@ position tick so execution buys at least the amount needed to cover debt.
 
 Expected behavior:
 
+- require `onBehalf == Bundler3.initiator()` so normal close flows cannot be
+  tricked into buying and repaying another borrower's debt
+- require `marketParams` to match the deployment-pinned USDm/wiTRY Morpho market
 - read `MorphoBalancesLib.expectedBorrowAssets(MORPHO, marketParams, onBehalf)`
 - revert if debt is zero
 - exact-output swap into `marketParams.loanToken`
@@ -285,8 +288,9 @@ function _swapExactOut(
 8. Clear router approval.
 9. Compute source spent and destination received by balance delta.
 10. Require `spent <= amountIn`.
-11. Require `received >= minAmountOut`.
-12. Transfer `received` `tokenOut` to `receiver`.
+11. Require `spent == amountIn`.
+12. Require `received >= minAmountOut`.
+13. Transfer `received` `tokenOut` to `receiver`.
 
 ### Exact Output `buy`
 
@@ -309,6 +313,8 @@ function _swapExactOut(
 9. Require `spent <= maxAmountIn`.
 10. Require `received >= amountOut`.
 11. Transfer `received` `tokenOut` to `receiver`.
+12. Refund up to the unspent `maxAmountIn - spent` source-token remainder to
+    `receiver`.
 
 Note: if World exact-output returns exactly `amountOut` but the router transfers
 slightly more because of rounding, the adapter should forward the actual balance
@@ -324,6 +330,8 @@ MegaETH:
 - chain id: `4326`
 - World Exchange: `0x5e3Ae52EbA0F9740364Bd5dd39738e1336086A8b`
 - World SwapRouter: `0x94b6706fa26a4f3dcf501ff25e1e4628b75adc69`
+- World SwapRouter code hash, queried June 18, 2026:
+  `0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66`
 - wiTRY / USDm spot order book: `0x8214Ca3a606dF76660bC492A6B69CE2570ad82c0`
 - USDm token: `0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7`
 - wiTRY token: `0x15B271D9012b5820FC42b1c495B4C1e206547De5`
@@ -499,7 +507,7 @@ Decision: hard-gate v1 to `USDm <-> wiTRY` on MegaETH.
 ### Router Address Configuration
 
 Decision: constructor immutables, with one adapter deployment per chain / World
-router.
+router / reference Morpho market.
 
 ### Deadlines
 
@@ -543,10 +551,14 @@ Reasoning:
 - `sell` supports `sellEntireBalance`
 - `sell` approves router, clears approval, measures deltas, and forwards output
 - `sell` reverts on underfill
+- `sell` reverts if WCM spends less than the exact input amount
 - `buy` rejects zero output
 - `buy` rejects zero max input
 - `buy` approves router, clears approval, measures deltas, and forwards output
 - `buy` reverts when source spent exceeds max
+- `buy` refunds unspent source-token remainder to `receiver`
+- `buyMorphoDebt` requires `onBehalf == Bundler3.initiator()`
+- `buyMorphoDebt` rejects same-token but non-pinned Morpho market params
 - `buyMorphoDebt` reverts on zero debt
 - `buyMorphoDebt` rounds live USDm debt up to the next USDm World position tick
   and forwards loan token to receiver
@@ -645,6 +657,10 @@ Adapter requirements:
 - clear router approvals after each swap
 - do not add custom owner/governance rescue
 - hard-gate v1 to USDm <-> wiTRY
+- hard-gate buyMorphoDebt to the reference Morpho market params
+- require buyMorphoDebt onBehalf to equal the Bundler3 initiator
+- require sell to spend the exact input amount
+- refund exact-output source-token remainder to receiver
 
 Verification target:
 - run a MegaETH fork at block 18981853 using RPC_URL_4326

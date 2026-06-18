@@ -30,6 +30,8 @@ abstract contract WcmLiveBase is Script {
     address internal constant WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
     address internal constant ORACLE = 0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22;
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
+    bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
+        0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
 
     address internal constant BORROWER = 0x40E4471293383e6e38Cb5Ce1E2C2Cd996742Cc0B;
     address internal constant LENDER = 0xa12dC13D9F3bE78E786E8cAd76F6289358448745;
@@ -43,6 +45,9 @@ abstract contract WcmLiveBase is Script {
     uint256 internal constant WITRY_POSITION_SCALE = 1e15;
     uint256 internal constant BPS = 10_000;
     uint32 internal constant WITRY_TOKEN_ID = 9;
+    uint256 internal constant MEGAETH_CHAIN_ID = 4326;
+    uint256 internal constant DEFAULT_DEADLINE_TTL = 2 minutes;
+    uint256 internal constant MAX_DEADLINE_TTL = 5 minutes;
 
     function marketParams() internal pure returns (MarketParams memory) {
         return MarketParams({loanToken: USDM, collateralToken: WITRY, oracle: ORACLE, irm: IRM, lltv: LLTV});
@@ -54,8 +59,10 @@ abstract contract WcmLiveBase is Script {
     }
 
     function _wcmAdapter() internal view returns (address adapter) {
+        _requireMegaEth();
         adapter = vm.envAddress("WCM_ADAPTER_ADDRESS");
         require(adapter != address(0), "missing WCM_ADAPTER_ADDRESS");
+        _validateWcmAdapter(adapter);
     }
 
     function _slippageBps() internal view returns (uint256) {
@@ -65,20 +72,21 @@ abstract contract WcmLiveBase is Script {
     }
 
     function _deadline() internal view returns (uint256) {
-        uint256 ttl = vm.envOr("WCM_DEADLINE_TTL", uint256(10 minutes));
+        uint256 ttl = vm.envOr("WCM_DEADLINE_TTL", DEFAULT_DEADLINE_TTL);
+        require(ttl != 0 && ttl <= MAX_DEADLINE_TTL, "invalid deadline ttl");
         return block.timestamp + ttl;
     }
 
     function _buyWitryAmountOut() internal view returns (uint256) {
-        return vm.envOr("WCM_BUY_WITRY_OUT", uint256(1e18));
+        return vm.envOr("WCM_BUY_WITRY_OUT", uint256(600e18));
     }
 
     function _openInitialCollateral() internal view returns (uint256) {
-        return vm.envOr("WCM_OPEN_INITIAL_COLLATERAL", uint256(100e18));
+        return vm.envOr("WCM_OPEN_INITIAL_COLLATERAL", uint256(1000e18));
     }
 
     function _openBorrowAmount() internal view returns (uint256) {
-        return vm.envOr("WCM_OPEN_BORROW_USDM", uint256(1e18));
+        return vm.envOr("WCM_OPEN_BORROW_USDM", uint256(12e18));
     }
 
     function _marketId() internal pure returns (Id) {
@@ -114,7 +122,7 @@ abstract contract WcmLiveBase is Script {
         bool isBuy = tokenIn == USDM && tokenOut == WITRY;
         uint256 inputScale = tokenIn == USDM ? USDM_POSITION_SCALE : WITRY_POSITION_SCALE;
         uint256 outputScale = tokenOut == USDM ? USDM_POSITION_SCALE : WITRY_POSITION_SCALE;
-        uint64 amountOutPosition = _toPositionAmount(amountOut, outputScale);
+        uint64 amountOutPosition = _toPositionAmountUp(amountOut, outputScale);
         uint256 quote = IWcmQuoteRouter(WORLD_SWAP_ROUTER)
             .priceByAmountOut(
                 _packSwapInputAmountOut(amountOutPosition, type(uint64).max, type(uint64).max, WITRY_TOKEN_ID, isBuy)
@@ -132,10 +140,51 @@ abstract contract WcmLiveBase is Script {
     }
 
     function _toPositionAmount(uint256 rawAmount, uint256 scale) internal pure returns (uint64 positionAmount) {
+        require(rawAmount % scale == 0, "amount not world aligned");
         uint256 value = rawAmount / scale;
         require(value != 0, "amount below world precision");
         require(value <= type(uint64).max, "position overflow");
         positionAmount = uint64(value);
+    }
+
+    function _toPositionAmountUp(uint256 rawAmount, uint256 scale) internal pure returns (uint64 positionAmount) {
+        uint256 value = _mulDivUp(rawAmount, 1, scale);
+        require(value != 0, "amount below world precision");
+        require(value <= type(uint64).max, "position overflow");
+        positionAmount = uint64(value);
+    }
+
+    function _requireMegaEth() internal view {
+        require(block.chainid == MEGAETH_CHAIN_ID, "wrong chain");
+        require(WORLD_SWAP_ROUTER.codehash == WORLD_SWAP_ROUTER_CODE_HASH, "wrong router codehash");
+    }
+
+    function _validateWcmAdapter(address adapter) internal view {
+        require(adapter.code.length != 0, "wcm adapter has no code");
+
+        WcmAdapter wcmAdapter = WcmAdapter(payable(adapter));
+        require(wcmAdapter.BUNDLER3() == BUNDLER3, "wrong adapter bundler");
+        require(address(wcmAdapter.MORPHO()) == MORPHO, "wrong adapter morpho");
+        require(address(wcmAdapter.ROUTER()) == WORLD_SWAP_ROUTER, "wrong adapter router");
+        require(wcmAdapter.USDM() == USDM, "wrong adapter usdm");
+        require(wcmAdapter.WITRY() == WITRY, "wrong adapter witry");
+        require(wcmAdapter.MARKET_ORACLE() == ORACLE, "wrong adapter oracle");
+        require(wcmAdapter.MARKET_IRM() == IRM, "wrong adapter irm");
+        require(wcmAdapter.MARKET_LLTV() == LLTV, "wrong adapter lltv");
+    }
+
+    function _useMaxApprovals() internal view returns (bool) {
+        uint256 value = vm.envOr("WCM_ALLOW_MAX_APPROVALS", uint256(0));
+        require(value <= 1, "invalid max approval flag");
+        return value == 1;
+    }
+
+    function _approveIfNeeded(address token, uint256 amount, string memory label) internal {
+        uint256 allowance = IERC20(token).allowance(BORROWER, GENERAL_ADAPTER1);
+        if (allowance == amount) return;
+
+        if (allowance != 0) require(IERC20(token).approve(GENERAL_ADAPTER1, 0), "zero approve failed");
+        require(IERC20(token).approve(GENERAL_ADAPTER1, amount), label);
     }
 
     function _packSwapInputAmountIn(uint64 amountIn, uint64 amountOutMin, uint64 deadline, uint32 tokenId, bool isBuy)
@@ -279,6 +328,7 @@ abstract contract WcmLiveBase is Script {
 
 contract WcmPreflightLive is WcmLiveBase {
     function run() external view {
+        _requireMegaEth();
         console2.log("block", block.number);
         _logTokenBalances("borrower", BORROWER);
         _logTokenBalances("lender", LENDER);
@@ -296,37 +346,44 @@ contract WcmPreflightLive is WcmLiveBase {
 
 contract WcmDeployLive is WcmLiveBase {
     function run() external returns (address deployed) {
+        _requireMegaEth();
         uint256 pk = _borrowerPk();
         vm.startBroadcast(pk);
-        WcmAdapter adapter = new WcmAdapter(BUNDLER3, MORPHO, WORLD_SWAP_ROUTER, USDM, WITRY);
+        WcmAdapter adapter = new WcmAdapter(BUNDLER3, MORPHO, WORLD_SWAP_ROUTER, USDM, WITRY, ORACLE, IRM, LLTV);
         deployed = address(adapter);
         vm.stopBroadcast();
 
         console2.log("WCM adapter deployed", deployed);
-        require(adapter.BUNDLER3() == BUNDLER3, "wrong bundler");
-        require(address(adapter.MORPHO()) == MORPHO, "wrong morpho");
-        require(address(adapter.ROUTER()) == WORLD_SWAP_ROUTER, "wrong router");
-        require(adapter.USDM() == USDM, "wrong usdm");
-        require(adapter.WITRY() == WITRY, "wrong witry");
+        _validateWcmAdapter(deployed);
     }
 }
 
 contract WcmPrepareLive is WcmLiveBase {
     function run() external {
+        _requireMegaEth();
         uint256 pk = _borrowerPk();
+        uint256 slippageBps = _slippageBps();
+        bool useMaxApprovals = _useMaxApprovals();
+
+        uint256 usdmApproval =
+            useMaxApprovals ? type(uint256).max : _quoteExactOut(USDM, WITRY, _buyWitryAmountOut(), slippageBps);
+
+        uint256 debtBefore = MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams(), BORROWER);
+        uint256 estimatedCloseDebt = _roundUpToUsdmWorldTick(debtBefore + _openBorrowAmount());
+        uint256 estimatedCloseMaxIn = _quoteExactOut(WITRY, USDM, estimatedCloseDebt, slippageBps);
+        uint256 witryApproval = useMaxApprovals ? type(uint256).max : _openInitialCollateral() + estimatedCloseMaxIn;
 
         vm.startBroadcast(pk);
         if (!IMorpho(MORPHO).isAuthorized(BORROWER, GENERAL_ADAPTER1)) {
             IMorpho(MORPHO).setAuthorization(GENERAL_ADAPTER1, true);
         }
-        if (IERC20(USDM).allowance(BORROWER, GENERAL_ADAPTER1) == 0) {
-            require(IERC20(USDM).approve(GENERAL_ADAPTER1, type(uint256).max), "usdm approve failed");
-        }
-        if (IERC20(WITRY).allowance(BORROWER, GENERAL_ADAPTER1) == 0) {
-            require(IERC20(WITRY).approve(GENERAL_ADAPTER1, type(uint256).max), "witry approve failed");
-        }
+        _approveIfNeeded(USDM, usdmApproval, "usdm approve failed");
+        _approveIfNeeded(WITRY, witryApproval, "witry approve failed");
         vm.stopBroadcast();
 
+        console2.log("Max approvals enabled", useMaxApprovals);
+        console2.log("Target USDm allowance to GeneralAdapter1", usdmApproval);
+        console2.log("Target wiTRY allowance to GeneralAdapter1", witryApproval);
         console2.log("Borrower authorizes GeneralAdapter1", IMorpho(MORPHO).isAuthorized(BORROWER, GENERAL_ADAPTER1));
         console2.log("Borrower USDm allowance to GeneralAdapter1", IERC20(USDM).allowance(BORROWER, GENERAL_ADAPTER1));
         console2.log("Borrower wiTRY allowance to GeneralAdapter1", IERC20(WITRY).allowance(BORROWER, GENERAL_ADAPTER1));

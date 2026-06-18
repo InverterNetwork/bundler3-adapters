@@ -324,96 +324,147 @@ liquidity and callback ordering risk beyond the adapter's three-function surface
 
 ## Proof Ledger
 
-Fill this table during execution.
+Live validation executed on June 18, 2026 with borrower signer
+`0x40E4471293383e6e38Cb5Ce1E2C2Cd996742Cc0B`.
 
 | Step | Tx hash | Block | Signer | Primary calls | Status | Notes |
 | --- | --- | ---: | --- | --- | --- | --- |
-| 0. Preflight snapshot | n/a | TBD | n/a | read-only | Pending | Record latest block and balances below. |
-| 1. Deploy adapter | TBD | TBD | TBD | `new WcmAdapter(...)` | Pending | Adapter address: TBD |
-| 2a. Morpho authorization | TBD | TBD | borrower | `setAuthorization` | Pending | Skip if already authorized. |
-| 2b. USDm approval | TBD | TBD | borrower | `USDm.approve` | Pending | Skip if sufficient. |
-| 2c. wiTRY approval | TBD | TBD | borrower | `wiTRY.approve` | Pending | Skip if sufficient. |
-| 3. `buy` | TBD | TBD | borrower | `Bundler3.multicall` | Pending | Exact-output USDm -> wiTRY. |
-| 4. Open leverage via `sell` | TBD | TBD | borrower | `Bundler3.multicall` | Pending | Borrow USDm, sell to wiTRY, resupply. |
-| 5. Close via `buyMorphoDebt` | TBD | TBD | borrower | `Bundler3.multicall` | Pending | Buy debt, repay, withdraw all collateral. |
-| 6. Cleanup, if any | TBD | TBD | TBD | sweeps / approvals | Pending | Only if needed. |
+| 0. Preflight snapshot | n/a | 18996760 | n/a | read-only | Complete | Adapter and GeneralAdapter1 clean; borrower authorization/allowances checked after prepare. |
+| 1. Deploy adapter | `0xc559f8bbf820f9420d2f9f13acb3355a3dce4ae557daf4d21380be00cd5bcd11` | 18996576 | borrower | `new WcmAdapter(...)` | Complete | Adapter: `0xbde192287378Ef3d7f1658c48f48F9e4c4095125`; immutables verified. |
+| 2a. Morpho authorization | `0x43013d8e0ef8066198aeed4ac0a967762585f3d7ba9c9833192937ddd115789b` | 18996733 | borrower | `setAuthorization(GeneralAdapter1, true)` | Complete | Final authorization: `true`. |
+| 2b. USDm approval | `0xd944e269ffb00930f3bf47f6dd7ced45c0eb9a1c245df74fe6b0bdd9df74ff89` | 18996663 | borrower | `USDm.approve(GeneralAdapter1, type(uint256).max)` | Complete | Final allowance: max uint256. |
+| 2c. wiTRY approval | `0x19d7bf064ad6dc38928bd2101ddaaa67b827e35e82de03e71c89f88de9f51b91` | 18996749 | borrower | `wiTRY.approve(GeneralAdapter1, type(uint256).max)` | Complete | Final allowance: max uint256. |
+| 3. `buy` | `0x95bdbc906d8abfdd5b65e4249d5de7aed7267277a0bb3724969602f081f6d0d6` | 18997024 | borrower | `Bundler3.multicall` | Complete | Exact-output `600 wiTRY`; actual spend `13.9412 USDm`; USDm refund `0.4183`. |
+| 4. Open leverage via `sell` | `0xc4207cd66a1e6fb889361bc15fa10057ad450a69505499536109dfa7115c5ac5` | 18997490 | borrower | `Bundler3.multicall` | Complete | Supplied `550 wiTRY`, borrowed `12 USDm`, sold into `516.456 wiTRY`, resupplied. |
+| 5. Close via `buyMorphoDebt` | `0xe47cd922008bce658f5d334ef76a6f5822688348b0bfb366d1dd95f06ccf8dff` | 18997754 | borrower | `Bundler3.multicall` | Complete | Bought rounded debt, repaid all borrow shares, withdrew all collateral. |
+| 6. Cleanup, if any | n/a | 18997778 | n/a | read-only final check | Complete | No cleanup tx required; final invariant script passed. |
+
+Notes:
+
+- Two forge deployment attempts failed from gas under-estimation before the
+  successful `cast send --create` deployment with explicit gas. Failed txs:
+  `0x72cfd8241b6b72204b7c2f513115babb1c96eb9dea4625b6f8f0f25383654489`
+  and `0x045610dfead3af18ac65f74158054a9edd767503a7253bdb05680ce1bc76d307`.
+- Small live World swaps failed during dry-run with custom error `0x7d92b186`.
+  The successful live sizes were `600 wiTRY` exact-output for `buy` and
+  `12 USDm` exact-input for the open `sell`.
+- Open and close transactions were first simulated locally with `forge script`
+  and then checked with `eth_call` using the exact Bundler3 calldata before
+  broadcasting with `cast send`.
 
 ## Snapshot Ledger
 
 ### Before Execution
 
 ```text
-Block: TBD
-WCM adapter: TBD
+Block: 18996760
+WCM adapter: 0xbde192287378Ef3d7f1658c48f48F9e4c4095125
 
 Borrower wallet:
-  ETH:   TBD
-  USDm:  TBD
-  wiTRY: TBD
+  ETH:   0.000873339549447595
+  USDm:  17.866807907270902531
+  wiTRY: 527.546938828624657977
 
 Borrower Morpho position:
-  supplyShares: TBD
-  borrowShares: TBD
-  expectedDebt: TBD
-  collateral:   TBD
+  supplyShares: 0
+  borrowShares: 6606904317320549110443
+  expectedDebt: 0.006607010623615862
+  collateral:   172.914862401045783208
 
 WCM adapter:
-  USDm balance:  TBD
-  wiTRY balance: TBD
-  USDm router allowance:  TBD
-  wiTRY router allowance: TBD
+  USDm balance:  0
+  wiTRY balance: 0
+  USDm router allowance:  0
+  wiTRY router allowance: 0
 
 GeneralAdapter1:
-  USDm balance:  TBD
-  wiTRY balance: TBD
+  USDm balance:  0
+  wiTRY balance: 0
+
+Borrower permissions:
+  Morpho authorization for GeneralAdapter1: true
+  USDm allowance to GeneralAdapter1: max uint256
+  wiTRY allowance to GeneralAdapter1: max uint256
 ```
 
 ### After `buy`
 
 ```text
-Block: TBD
-Tx: TBD
-Quoted amountOut: TBD
-maxAmountIn: TBD
-Actual borrower wiTRY delta: TBD
-Refunded USDm: TBD
-WCM adapter USDm balance: TBD
-WCM adapter wiTRY balance: TBD
-WCM adapter USDm router allowance: TBD
+Block: 18997024
+Tx: 0x95bdbc906d8abfdd5b65e4249d5de7aed7267277a0bb3724969602f081f6d0d6
+amountOut: 600 wiTRY
+maxAmountIn: 14.3595 USDm
+Actual USDm spent: 13.9412 USDm
+Actual borrower wiTRY delta: 600 wiTRY
+Refunded USDm: 0.4183 USDm
+WCM adapter USDm balance: 0
+WCM adapter wiTRY balance: 0
+WCM adapter USDm router allowance: 0
+
+Post-buy read-only snapshot at block 18997238:
+  Borrower ETH:   0.000872554148413023
+  Borrower USDm:  3.925607907270902531
+  Borrower wiTRY: 1127.546938828624657977
+  Borrower expectedDebt: 0.006607011311761424
+  Borrower collateral:   172.914862401045783208
+  GeneralAdapter1 USDm balance:  0
+  GeneralAdapter1 wiTRY balance: 0
 ```
 
 ### After Open Leverage
 
 ```text
-Block: TBD
-Tx: TBD
-initialCollateral: TBD
-borrowAmount: TBD
-minAmountOut: TBD
-Actual supplied collateral delta: TBD
-Actual debt delta: TBD
-WCM adapter USDm balance: TBD
-WCM adapter wiTRY balance: TBD
-WCM adapter USDm router allowance: TBD
+Block: 18997490
+Tx: 0xc4207cd66a1e6fb889361bc15fa10057ad450a69505499536109dfa7115c5ac5
+initialCollateral: 550 wiTRY
+borrowAmount: 12 USDm
+minAmountOut: 500.962 wiTRY
+Actual WCM sell output: 516.456 wiTRY
+Actual supplied collateral delta: 1066.456 wiTRY
+Debt after open: 12.006607223104269327 USDm
+Collateral after open: 1239.370862401045783208 wiTRY
+WCM adapter USDm balance: 0
+WCM adapter wiTRY balance: 0
+WCM adapter USDm router allowance: 0
+GeneralAdapter1 USDm balance: 0
+GeneralAdapter1 wiTRY balance: 0
+
+Post-open read-only snapshot at block 18997517:
+  Borrower ETH:   0.000871072406258566
+  Borrower USDm:  3.925607907270902531
+  Borrower wiTRY: 577.546938828624657977
+  Borrower borrowShares: 12006411916879121024439170
+  Borrower expectedDebt: 12.006607223104269327
+  Borrower collateral:   1239.370862401045783208
 ```
 
 ### After Full Close
 
 ```text
-Block: TBD
-Tx: TBD
-Debt before close: TBD
-Rounded debt bought: TBD
-maxAmountIn: TBD
-Actual wiTRY spent: TBD
-Final borrowShares: TBD
-Final expectedDebt: TBD
-Final collateral: TBD
-WCM adapter USDm balance: TBD
-WCM adapter wiTRY balance: TBD
-GeneralAdapter1 USDm balance: TBD
-GeneralAdapter1 wiTRY balance: TBD
-WCM adapter wiTRY router allowance: TBD
+Block: 18997754
+Tx: 0xe47cd922008bce658f5d334ef76a6f5822688348b0bfb366d1dd95f06ccf8dff
+Debt before close: 12.006607794733071637 USDm
+Rounded debt bought: 12.0067 USDm
+maxAmountIn: 534.389 wiTRY
+Actual wiTRY spent: 518.824 wiTRY
+Unused wiTRY returned from WCM adapter: 15.565 wiTRY
+Actual Morpho repay: 12.006609078860010592 USDm
+Surplus USDm swept to borrower: 0.000090921139989408
+Collateral withdrawn to borrower: 1239.370862401045783208 wiTRY
+
+Final check at block 18997778:
+  Borrower ETH:   0.000869704874917527
+  Borrower USDm:  3.925698828410891939
+  Borrower wiTRY: 1298.093801229670441185
+  Final borrowShares: 0
+  Final expectedDebt: 0
+  Final collateral: 0
+  WCM adapter USDm balance: 0
+  WCM adapter wiTRY balance: 0
+  WCM adapter USDm router allowance: 0
+  WCM adapter wiTRY router allowance: 0
+  GeneralAdapter1 USDm balance: 0
+  GeneralAdapter1 wiTRY balance: 0
 ```
 
 ## Stop Conditions

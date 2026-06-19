@@ -32,6 +32,8 @@ abstract contract WcmLiveBase is Script {
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
     bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
         0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
+    bytes32 internal constant WCM_ADAPTER_CODE_HASH =
+        0x420c6d7f76359c0c7d0bdfa8261abf00d2e986db45d76881b170d0a5a3e46c9c;
 
     address internal constant BORROWER = 0x40E4471293383e6e38Cb5Ce1E2C2Cd996742Cc0B;
     address internal constant LENDER = 0xa12dC13D9F3bE78E786E8cAd76F6289358448745;
@@ -48,6 +50,7 @@ abstract contract WcmLiveBase is Script {
     uint256 internal constant MEGAETH_CHAIN_ID = 4326;
     uint256 internal constant DEFAULT_DEADLINE_TTL = 2 minutes;
     uint256 internal constant MAX_DEADLINE_TTL = 5 minutes;
+    uint256 internal constant MAX_LIVE_SLIPPAGE_BPS = 500;
 
     function marketParams() internal pure returns (MarketParams memory) {
         return MarketParams({loanToken: USDM, collateralToken: WITRY, oracle: ORACLE, irm: IRM, lltv: LLTV});
@@ -67,7 +70,7 @@ abstract contract WcmLiveBase is Script {
 
     function _slippageBps() internal view returns (uint256) {
         uint256 value = vm.envOr("WCM_SLIPPAGE_BPS", uint256(300));
-        require(value < BPS, "invalid slippage");
+        require(value <= MAX_LIVE_SLIPPAGE_BPS, "invalid slippage");
         return value;
     }
 
@@ -79,6 +82,10 @@ abstract contract WcmLiveBase is Script {
 
     function _buyWitryAmountOut() internal view returns (uint256) {
         return vm.envOr("WCM_BUY_WITRY_OUT", uint256(600e18));
+    }
+
+    function _sellWitryAmountIn() internal view returns (uint256) {
+        return vm.envOr("WCM_SELL_WITRY_IN", uint256(500e18));
     }
 
     function _openInitialCollateral() internal view returns (uint256) {
@@ -159,8 +166,8 @@ abstract contract WcmLiveBase is Script {
         require(WORLD_SWAP_ROUTER.codehash == WORLD_SWAP_ROUTER_CODE_HASH, "wrong router codehash");
     }
 
-    function _wcmAdapterCodeHash() internal view returns (bytes32) {
-        return vm.envBytes32("WCM_ADAPTER_CODE_HASH");
+    function _wcmAdapterCodeHash() internal pure returns (bytes32) {
+        return WCM_ADAPTER_CODE_HASH;
     }
 
     function _validateWcmAdapter(address adapter, bytes32 expectedCodeHash) internal view {
@@ -313,6 +320,14 @@ abstract contract WcmLiveBase is Script {
         console2.log("  collateral", uint256(p.collateral));
     }
 
+    function _requireNoBorrowerPosition() internal view {
+        Position memory p = IMorpho(MORPHO).position(_marketId(), BORROWER);
+        uint256 debt = MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams(), BORROWER);
+        require(p.borrowShares == 0, "borrower has pre-existing borrow shares");
+        require(debt == 0, "borrower has pre-existing debt");
+        require(p.collateral == 0, "borrower has pre-existing collateral");
+    }
+
     function _logAdapterState(address wcmAdapter) internal view {
         console2.log("WCM adapter", wcmAdapter);
         console2.log("  USDm balance", IERC20(USDM).balanceOf(wcmAdapter));
@@ -444,6 +459,38 @@ contract WcmBuyLive is WcmLiveBase {
     }
 }
 
+contract WcmSellLive is WcmLiveBase {
+    function run() external {
+        uint256 pk = _borrowerPk();
+        address wcmAdapter = _wcmAdapter();
+        uint256 amountIn = _sellWitryAmountIn();
+        uint256 minAmountOut = _quoteExactIn(WITRY, USDM, amountIn, _slippageBps());
+
+        console2.log("sell amountIn wiTRY", amountIn);
+        console2.log("sell minAmountOut USDm", minAmountOut);
+        require(IERC20(WITRY).balanceOf(BORROWER) >= amountIn, "borrower witry too low");
+        require(IERC20(WITRY).allowance(BORROWER, GENERAL_ADAPTER1) >= amountIn, "witry allowance too low");
+
+        uint256 borrowerUsdmBefore = IERC20(USDM).balanceOf(BORROWER);
+
+        Call[] memory bundle = new Call[](3);
+        bundle[0] = _erc20TransferFrom(WITRY, wcmAdapter, amountIn);
+        bundle[1] = _call(
+            wcmAdapter, abi.encodeCall(IWcmAdapter.sell, (WITRY, USDM, amountIn, minAmountOut, false, BORROWER, _deadline()))
+        );
+        bundle[2] = _erc20Transfer(wcmAdapter, WITRY, BORROWER, type(uint256).max);
+
+        vm.startBroadcast(pk);
+        Bundler3(payable(BUNDLER3)).multicall(bundle);
+        vm.stopBroadcast();
+
+        uint256 borrowerUsdmDelta = IERC20(USDM).balanceOf(BORROWER) - borrowerUsdmBefore;
+        console2.log("sell borrower USDm delta", borrowerUsdmDelta);
+        require(borrowerUsdmDelta >= minAmountOut, "sell underfilled");
+        _assertWcmClean(wcmAdapter);
+    }
+}
+
 contract WcmOpenLive is WcmLiveBase {
     function run() external {
         uint256 pk = _borrowerPk();
@@ -463,8 +510,12 @@ contract WcmOpenLive is WcmLiveBase {
         console2.log("estimated close maxIn wiTRY", estimatedCloseMaxIn);
 
         require(IMorpho(MORPHO).isAuthorized(BORROWER, GENERAL_ADAPTER1), "missing morpho authorization");
+        _requireNoBorrowerPosition();
         require(borrowerWitryBefore >= initialCollateral + estimatedCloseMaxIn, "not enough free wiTRY for open+close");
-        require(IERC20(WITRY).allowance(BORROWER, GENERAL_ADAPTER1) >= initialCollateral, "witry allowance too low");
+        require(
+            IERC20(WITRY).allowance(BORROWER, GENERAL_ADAPTER1) >= initialCollateral + estimatedCloseMaxIn,
+            "witry allowance too low"
+        );
 
         Position memory positionBefore = IMorpho(MORPHO).position(_marketId(), BORROWER);
 

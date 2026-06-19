@@ -409,6 +409,46 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
     }
 
+    function testBuyForwardsDeltaOnlyAndRefundsOnlyUnspentAllowance() public {
+        uint256 initialOutputDust = 7e18;
+        uint256 initialSourceDust = 4e18;
+        uint256 amountOut = 10e18;
+        uint256 spent = 8e18;
+        uint256 maxAmountIn = 12e18;
+
+        deal(address(loanToken), address(wcmAdapter), initialOutputDust);
+        deal(address(collateralToken), address(wcmAdapter), initialSourceDust + maxAmountIn);
+        wcmRouter.setToTake(spent);
+
+        bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amountOut, maxAmountIn, RECEIVER));
+
+        bundler3.multicall(bundle);
+
+        assertEq(loanToken.balanceOf(RECEIVER), amountOut, "receiver loan delta");
+        assertEq(collateralToken.balanceOf(RECEIVER), maxAmountIn - spent, "receiver bounded source refund");
+        assertEq(loanToken.balanceOf(address(wcmAdapter)), initialOutputDust, "adapter output dust");
+        assertEq(collateralToken.balanceOf(address(wcmAdapter)), initialSourceDust, "adapter source dust");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+    }
+
+    function testBuyIgnoresRouterReturnForRefundAccounting() public {
+        uint256 amountOut = 10e18;
+        uint256 spent = 8e18;
+        uint256 maxAmountIn = 12e18;
+
+        deal(address(collateralToken), address(wcmAdapter), maxAmountIn);
+        wcmRouter.setToTake(spent);
+        wcmRouter.setToReturn(0);
+
+        bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amountOut, maxAmountIn, RECEIVER));
+
+        bundler3.multicall(bundle);
+
+        assertEq(loanToken.balanceOf(RECEIVER), amountOut, "receiver loan");
+        assertEq(collateralToken.balanceOf(RECEIVER), maxAmountIn - spent, "receiver source refund");
+        assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
+    }
+
     function testSellForwardsReceivedDeltaOnly() public {
         uint256 initialOutputDust = 7e18;
         uint256 amount = 10e18;
@@ -430,6 +470,18 @@ contract WcmAdapterLocalTest is Test {
 
         deal(address(collateralToken), address(wcmAdapter), amount);
         wcmRouter.setToGive(amount - 1);
+
+        vm.expectRevert(ErrorsLib.BuyAmountTooLow.selector);
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, amount, false, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
+    function testSellUnderfillRevertsWhenRouterReturnLies() public {
+        uint256 amount = 10e18;
+
+        deal(address(collateralToken), address(wcmAdapter), amount);
+        wcmRouter.setToGive(amount - 1);
+        wcmRouter.setToReturn(amount);
 
         vm.expectRevert(ErrorsLib.BuyAmountTooLow.selector);
         bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, amount, false, RECEIVER));
@@ -544,6 +596,34 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.balanceOf(RECEIVER), 0, "receiver source");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+    }
+
+    function testBuyMorphoDebtForwardsDeltaOnlyAndRefundsOnlyUnspentAllowance() public {
+        uint256 initialOutputDust = 7e18;
+        uint256 initialSourceDust = 4e18;
+        uint256 debtShares = 10e18 + 1;
+        uint256 extraSource = 3e18;
+
+        morpho.setDebt(marketParams, address(this), debtShares);
+
+        uint256 debtAmount =
+            MorphoBalancesLib.expectedBorrowAssets(IMorpho(address(morpho)), marketParams, address(this));
+        uint256 roundedDebt = _roundUpToUsdmWorldTick(debtAmount);
+        uint256 maxAmountIn = roundedDebt + extraSource;
+
+        deal(address(loanToken), address(wcmAdapter), initialOutputDust);
+        deal(address(collateralToken), address(wcmAdapter), initialSourceDust + maxAmountIn);
+
+        bundle.push(_wcmBuyMorphoDebt(address(collateralToken), marketParams, maxAmountIn, address(this), RECEIVER));
+
+        bundler3.multicall(bundle);
+
+        assertEq(loanToken.balanceOf(RECEIVER), roundedDebt, "receiver loan delta");
+        assertEq(collateralToken.balanceOf(address(this)), extraSource, "onBehalf bounded source refund");
+        assertEq(collateralToken.balanceOf(RECEIVER), 0, "receiver source");
+        assertEq(loanToken.balanceOf(address(wcmAdapter)), initialOutputDust, "adapter output dust");
+        assertEq(collateralToken.balanceOf(address(wcmAdapter)), initialSourceDust, "adapter source dust");
         assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
     }
 

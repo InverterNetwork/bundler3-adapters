@@ -341,8 +341,8 @@ MegaETH:
 - World SwapRouter code hash, queried June 18, 2026:
   `0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66`
 - Live validation must also pin the deployed `WcmAdapter` runtime code hash.
-  `WcmDeployLive` prints this value after deployment; later live scripts require
-  it as `WCM_ADAPTER_CODE_HASH`.
+  `WcmDeployLive` prints this value after deployment; later live scripts compare
+  candidate adapters against a compiled-in `WCM_ADAPTER_CODE_HASH` constant.
 - wiTRY / USDm spot order book: `0x8214Ca3a606dF76660bC492A6B69CE2570ad82c0`
 - USDm token: `0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7`
 - wiTRY token: `0x15B271D9012b5820FC42b1c495B4C1e206547De5`

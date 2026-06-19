@@ -476,7 +476,8 @@ contract WcmSellLive is WcmLiveBase {
         Call[] memory bundle = new Call[](3);
         bundle[0] = _erc20TransferFrom(WITRY, wcmAdapter, amountIn);
         bundle[1] = _call(
-            wcmAdapter, abi.encodeCall(IWcmAdapter.sell, (WITRY, USDM, amountIn, minAmountOut, false, BORROWER, _deadline()))
+            wcmAdapter,
+            abi.encodeCall(IWcmAdapter.sell, (WITRY, USDM, amountIn, minAmountOut, false, BORROWER, _deadline()))
         );
         bundle[2] = _erc20Transfer(wcmAdapter, WITRY, BORROWER, type(uint256).max);
 

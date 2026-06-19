@@ -73,6 +73,18 @@ Contains the following actions, all using the paraswap aggregator:
 - Buy a given amount.
 - Buy a what's needed to fully repay on a given Morpho Market.
 
+### [`WcmAdapter`](./src/adapters/WcmAdapter.sol)
+
+Contains the following actions for the MegaETH World Markets / WCM
+`USDm <-> wiTRY` route:
+
+- Sell a given amount or the adapter balance.
+- Buy a given amount.
+- Buy the live USDm debt needed to fully repay the pinned Morpho market.
+
+See [`docs/wcm-adapter-spec.md`](./docs/wcm-adapter-spec.md) for the adapter
+model, supported deployment, and reproducible WCM validation commands.
+
 ### Migration adapters
 
 For [Aave V2](./src/adapters/migration/AaveV2MigrationAdapter.sol), [Aave V3](./src/adapters/migration/AaveV3MigrationAdapter.sol), [Compound V2](./src/adapters/migration/CompoundV2MigrationAdapter.sol), [Compound V3](./src/adapters/migration/CompoundV3MigrationAdapter.sol), and [Morpho Aave V3 Optimizer](./src/adapters/migration/AaveV3OptimizerMigrationAdapter.sol).
@@ -87,6 +99,13 @@ Individual adapters such as `GenericAdapter1` are safe to approve.
 ## Development
 
 Run tests with `forge test --chain <chainid>` (chainid can be 1 or 8453, 1 by default).
+
+WCM MegaETH fork tests require `RPC_URL_4326`:
+
+```bash
+export RPC_URL_4326=https://rpc.inverter.network/main/evm/4326
+forge test --match-contract 'Wcm.*Test' -vvv
+```
 
 ## Audits
 

@@ -340,25 +340,41 @@ Validation:
 - GeneralAdapter1 wiTRY balance is zero
 - WCM adapter router allowance for wiTRY is zero
 
-### Optional Step 6: Collateral-Funded Close Variant
+### Step 6: Fork-Proven Flashloan Close Variant
 
-If the required validation is expanded from "adapter proof" to "collateral-funded
-full close proof", use a separate runbook step after fork-simulating it at the
-latest block.
+This variant proves the adapter inside the full Bundler3/Morpho flashloan
+callback path. It is not required for the initial live validation proof above,
+but it is the handoff target for collateral-funded close/exit testing.
 
-Candidate shape:
+Fork-proven shape:
 
 1. `GeneralAdapter1.morphoFlashLoan(wiTRY, currentCollateral, callbackData)`
 2. inside callback, transfer flashloaned wiTRY to WCM adapter
 3. `WcmAdapter.buyMorphoDebt(wiTRY, marketParams, maxAmountIn, borrower, GeneralAdapter1, deadline)`
-4. sweep leftover wiTRY from WCM adapter to `GeneralAdapter1`
-5. repay full borrower debt
-6. withdraw all borrower collateral to `GeneralAdapter1`
-7. let Morpho pull back the flashloaned wiTRY
-8. after callback, sweep remaining wiTRY to borrower
+4. repay full borrower debt
+5. withdraw all borrower collateral to `GeneralAdapter1`
+6. let Morpho pull back the flashloaned wiTRY
+7. after callback, sweep remaining wiTRY to borrower
 
-This is not required for the first live validation because it adds flashloan
-liquidity and callback ordering risk beyond the adapter's three-function surface.
+The fork proof also covers the other public adapter functions inside the same
+callback/reenter architecture:
+
+- flashloan-assisted open using `sell(USDm, wiTRY, ...)`
+- focused exact-output callback smoke test using `buy(USDm, wiTRY, ...)`
+
+Important fork-test notes:
+
+- Use fork block `19054909` for this proof. It matches the live-validated close
+  block and has executable World depth for the selected sizes.
+- Use live-proven sizes around `12 USDm` exact input and `600 wiTRY` exact
+  output. Smaller `6-10 USDm` open sizes can fail World execution with custom
+  error `0x7d92b186` even when read-only quotes look plausible.
+- For the wiTRY flashloan close, seed extra Morpho wiTRY collateral liquidity in
+  the fork before the close. Morpho must still have enough wiTRY token balance to
+  honor the collateral withdrawal before the flashloan is repaid.
+- `buyMorphoDebt` refunds unused wiTRY source token to `onBehalf`. The remaining
+  wiTRY left on `GeneralAdapter1` after flashloan repayment should be swept to
+  the borrower by the outer bundle.
 
 ## Proof Ledger
 

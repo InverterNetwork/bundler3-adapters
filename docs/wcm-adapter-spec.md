@@ -32,11 +32,15 @@ Minimum verification criterion:
   - `sell`
   - `buy`
   - `buyMorphoDebt`
+- a MegaETH fork test invokes all three adapter functions from inside a
+  `GeneralAdapter1.morphoFlashLoan` callback/reenter flow
 - each invocation goes through the deployed World `SwapRouter`
 - each invocation enforces caller-supplied bounds by balance delta
 - each invocation forwards bought tokens to the requested `receiver`
 - `buyMorphoDebt` reads live Morpho debt during execution and buys at least the
   loan token amount needed for that debt
+- flashloan repayment succeeds atomically, and `WcmAdapter` plus
+  `GeneralAdapter1` finish with no USDm/wiTRY balances or World router approvals
 
 ## Handoff Resolution Checklist
 
@@ -377,6 +381,16 @@ Recommended fork block:
 18981853
 ```
 
+Flashloan callback/reenter proof block:
+
+```text
+19054909
+```
+
+Use `19054909` for flashloan composition tests because it is the live-validated
+close block and supports the exact World sizes used by the proof. Keep
+`18981853` as the baseline adapter/probe discovery block.
+
 Prior successful liquidation fork block:
 
 ```text
@@ -389,8 +403,9 @@ Minimum useful fork block:
 18755218
 ```
 
-`18755218` is the market creation block. Use `18981853` unless reproducing the
-older liquidation helper exactly.
+`18755218` is the market creation block. Use `19054909` for flashloan
+callback/reenter proof tests, `18981853` for baseline adapter/probe checks, or
+`18815971` only when reproducing the older liquidation helper exactly.
 
 ### Deployed Contracts
 
@@ -483,7 +498,10 @@ Executable fork probe sizes that passed at block `18981853`:
 - exact output: buy `12 USDm` with at most `600 wiTRY`
 
 For fork tests, choose sizes around or above these values to avoid CLOB minimum
-order and depth fragility.
+order and depth fragility. At the flashloan proof block `19054909`, `12 USDm`
+exact-input and `600 wiTRY` exact-output are the live-proven sizes. Smaller
+`6-10 USDm` exact-input open sizes can fail execution with World custom error
+`0x7d92b186` even when read-only quotes look plausible.
 
 ### Prior Reference Code
 
@@ -603,6 +621,24 @@ Reasoning:
   at least the required loan token amount
 - confirm no allowlist/registration issue for adapter caller
 - confirm output lands on adapter and is forwarded by delta
+
+### Flashloan Callback / Reenter Tests
+
+- MegaETH fork at block `19054909`: `GeneralAdapter1.morphoFlashLoan(USDm, ...)`
+  reenters Bundler3 and invokes `WcmAdapter.sell(USDm, wiTRY, ...)` for a
+  flashloan-assisted open/increase flow.
+- MegaETH fork at block `19054909`: `GeneralAdapter1.morphoFlashLoan(USDm, ...)`
+  reenters Bundler3 and invokes `WcmAdapter.buy(USDm, wiTRY, ...)` as a focused
+  exact-output callback smoke test.
+- MegaETH fork at block `19054909`: `GeneralAdapter1.morphoFlashLoan(wiTRY, ...)`
+  reenters Bundler3 and invokes `WcmAdapter.buyMorphoDebt(wiTRY, ...)`, repays
+  the full borrower debt through `GeneralAdapter1`, withdraws all borrower
+  collateral, and repays the wiTRY flashloan atomically.
+- After each flashloan path, assert `WcmAdapter` and `GeneralAdapter1` hold zero
+  USDm and wiTRY, and assert the WCM router allowances for both tokens are zero.
+- For the wiTRY flashloan close, seed extra fork-only Morpho wiTRY collateral
+  liquidity before the close so Morpho can satisfy the collateral withdrawal
+  before the flashloan repayment is pulled.
 
 ### Exact-Output Verification Recipe
 

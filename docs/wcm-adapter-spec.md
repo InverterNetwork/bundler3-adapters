@@ -139,6 +139,8 @@ Exact-input swap.
   `tokenIn` balance.
 - Reverts on zero input, zero minimum output, unsupported pair, expired
   deadline, wrong chain id, wrong router code hash, or invalid receiver.
+- Requires the adapter's `tokenIn` balance to be at least `amountIn` before
+  calling the router.
 - Calls WCM `exactInputSingle` with `fee = 0`, `recipient = address(this)`, and
   `sqrtPriceLimitX96 = 0`.
 - Requires the router to spend exactly `amountIn`.
@@ -151,6 +153,8 @@ Exact-output swap.
 
 - Reverts on zero output, zero maximum input, unsupported pair, expired deadline,
   wrong chain id, wrong router code hash, or invalid receiver.
+- Requires the adapter's `tokenIn` balance to be at least `maxAmountIn` before
+  calling the router.
 - Calls WCM `exactOutputSingle` with `fee = 0`, `recipient = address(this)`, and
   `sqrtPriceLimitX96 = 0`.
 - Requires input spent to be at most `maxAmountIn`.

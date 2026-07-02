@@ -355,6 +355,16 @@ contract WcmAdapterLocalTest is Test {
         );
     }
 
+    function testInvalidRouterCodeHashAfterDeployment() public {
+        vm.etch(address(wcmRouter), hex"00");
+
+        deal(address(collateralToken), address(wcmAdapter), 1);
+
+        vm.expectRevert(ErrorsLib.InvalidWcmRouter.selector);
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), 1, 1, false, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
     function testSellNoAdjustment() public {
         uint256 amount = 10e18;
         uint256 extra = 3e18;

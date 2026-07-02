@@ -446,6 +446,26 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
     }
 
+    function testSellUsdmAllDustReverts() public {
+        uint256 amount = USDM_WORLD_TICK - 1;
+
+        deal(address(loanToken), address(wcmAdapter), amount);
+
+        vm.expectRevert(ErrorsLib.ZeroAmount.selector);
+        bundle.push(_wcmSell(address(loanToken), address(collateralToken), amount, 1, false, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
+    function testSellEntireBalanceWitryAllDustReverts() public {
+        uint256 amount = WITRY_WORLD_TICK - 1;
+
+        deal(address(collateralToken), address(wcmAdapter), amount);
+
+        vm.expectRevert(ErrorsLib.ZeroAmount.selector);
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), 1, 1, true, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
     function testBuyForwardsDeltaAndRefundsUnspentSource() public {
         uint256 amount = 10e18;
         uint256 extra = 3e18;

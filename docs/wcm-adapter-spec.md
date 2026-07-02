@@ -139,7 +139,8 @@ Exact-input swap.
   `tokenIn` balance.
 - Rounds `amountIn` down to the input token's World position precision
   (`1e14` for USDm and `1e15` for wiTRY), and refunds the source-token dust
-  remainder to the Bundler3 initiator.
+  remainder to the Bundler3 initiator when the rounded input is nonzero.
+- Reverts if `amountIn` is below the input token's World position precision.
 - Reverts on zero input, zero minimum output, unsupported pair, expired
   deadline, wrong chain id, wrong router code hash, or invalid receiver.
 - Calls WCM `exactInputSingle` with `fee = 0`, `recipient = address(this)`, and

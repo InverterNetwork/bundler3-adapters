@@ -119,13 +119,13 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     }
 
     /// @notice Buys an exact output amount through WCM.
-    /// @dev Tokens must have been sent to the adapter before this call. If more `tokenIn` than needed is present,
-    /// up to the unspent `maxAmountIn` remainder is refunded to `receiver`.
+    /// @dev Tokens must have been sent to the adapter before this call. `receiver` is the swap beneficiary: it
+    /// receives the bought tokens and up to the unspent `maxAmountIn` source-token remainder.
     /// @param tokenIn Token to sell.
     /// @param tokenOut Token to buy.
     /// @param amountOut Exact output amount to buy.
     /// @param maxAmountIn Maximum acceptable input amount.
-    /// @param receiver Address receiving the bought tokens.
+    /// @param receiver Address receiving the bought tokens and bounded unspent `tokenIn` refund.
     /// @param deadline World router deadline.
     function buy(
         address tokenIn,
@@ -142,9 +142,9 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     }
 
     /// @notice Buys an amount corresponding to a user's Morpho debt.
-    /// @dev The bought loan token is forwarded to `receiver`, usually `GeneralAdapter1`. Unspent `tokenIn` is refunded
-    /// to `onBehalf`. `onBehalf` must be the Bundler3 initiator, and `marketParams` must match the market pinned at
-    /// deployment.
+    /// @dev The bought loan token is forwarded to `receiver`, usually `GeneralAdapter1`. Unlike generic `buy`,
+    /// unspent `tokenIn` is refunded to `onBehalf` because `receiver` may be an intermediate adapter for repayment.
+    /// `onBehalf` must be the Bundler3 initiator, and `marketParams` must match the market pinned at deployment.
     /// @param tokenIn Token to sell.
     /// @param marketParams Market parameters of the market with Morpho debt.
     /// @param maxAmountIn Maximum acceptable input amount.

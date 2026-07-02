@@ -131,6 +131,18 @@ function buyMorphoDebt(
 ) external;
 ```
 
+### Refund Semantics
+
+For generic `buy`, `receiver` is the beneficiary of the exact-output swap. The
+adapter sends both the bought-token balance delta and the bounded unspent
+source-token refund to `receiver`. Callers should only pass a third-party
+receiver when that address is intended to receive both assets.
+
+`buyMorphoDebt` intentionally separates the bought-token receiver from the
+refund receiver. Bought USDm may be sent to `GeneralAdapter1` for a subsequent
+`morphoRepay`, while any unspent wiTRY is refunded to `onBehalf`, which must be
+the Bundler3 initiator.
+
 ### `sell`
 
 Exact-input swap.

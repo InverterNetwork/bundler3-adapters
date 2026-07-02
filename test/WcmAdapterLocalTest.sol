@@ -499,6 +499,16 @@ contract WcmAdapterLocalTest is Test {
         bundler3.multicall(bundle);
     }
 
+    function testSellInsufficientBalanceReverts() public {
+        uint256 amount = 10e18;
+
+        deal(address(collateralToken), address(wcmAdapter), amount - 1);
+
+        vm.expectRevert(ErrorsLib.InsufficientBalance.selector);
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, amount, false, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
     function testBuyUnderfillReverts() public {
         uint256 amount = 10e18;
 
@@ -506,6 +516,16 @@ contract WcmAdapterLocalTest is Test {
         wcmRouter.setToGive(amount - 1);
 
         vm.expectRevert(ErrorsLib.BuyAmountTooLow.selector);
+        bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amount, amount, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
+    function testBuyInsufficientBalanceReverts() public {
+        uint256 amount = 10e18;
+
+        deal(address(collateralToken), address(wcmAdapter), amount - 1);
+
+        vm.expectRevert(ErrorsLib.InsufficientBalance.selector);
         bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amount, amount, RECEIVER));
         bundler3.multicall(bundle);
     }

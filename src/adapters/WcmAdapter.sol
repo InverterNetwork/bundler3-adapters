@@ -184,6 +184,7 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         _validateSwap(tokenIn, tokenOut, receiver, deadline);
 
         uint256 tokenInBefore = IERC20(tokenIn).balanceOf(address(this));
+        require(tokenInBefore >= amountIn, ErrorsLib.InsufficientBalance());
         uint256 tokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
 
         SafeERC20.forceApprove(IERC20(tokenIn), address(ROUTER), amountIn);
@@ -227,6 +228,7 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         require(refundReceiver != address(this), ErrorsLib.AdapterAddress());
 
         uint256 tokenInBefore = IERC20(tokenIn).balanceOf(address(this));
+        require(tokenInBefore >= maxAmountIn, ErrorsLib.InsufficientBalance());
         uint256 tokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
 
         SafeERC20.forceApprove(IERC20(tokenIn), address(ROUTER), maxAmountIn);

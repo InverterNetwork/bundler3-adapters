@@ -340,7 +340,8 @@ contract WcmAdapterLocalTest is Test {
     }
 
     function testInvalidRouterCodeHash() public {
-        wcmAdapter = new WcmAdapter(
+        vm.expectRevert(ErrorsLib.InvalidWcmRouter.selector);
+        new WcmAdapter(
             address(bundler3),
             address(morpho),
             address(wcmRouter),
@@ -352,12 +353,6 @@ contract WcmAdapterLocalTest is Test {
             IRM,
             LLTV
         );
-
-        deal(address(collateralToken), address(wcmAdapter), 1);
-
-        vm.expectRevert(ErrorsLib.InvalidWcmRouter.selector);
-        bundle.push(_wcmSell(address(collateralToken), address(loanToken), 1, 1, false, RECEIVER));
-        bundler3.multicall(bundle);
     }
 
     function testSellNoAdjustment() public {

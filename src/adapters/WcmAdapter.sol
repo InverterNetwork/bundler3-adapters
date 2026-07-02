@@ -78,6 +78,7 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         require(marketIrm != address(0), ErrorsLib.ZeroAddress());
         require(marketLltv != 0, ErrorsLib.ZeroAmount());
         require(usdm != witry, ErrorsLib.InvalidWcmPair());
+        require(router.codehash == routerCodeHash, ErrorsLib.InvalidWcmRouter());
 
         MORPHO = IMorpho(morpho);
         ROUTER = IWcmSwapRouter(router);

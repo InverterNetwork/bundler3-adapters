@@ -149,11 +149,15 @@ Exact-input swap.
 
 - If `sellEntireBalance` is true, `amountIn` is replaced with the adapter's full
   `tokenIn` balance.
+- Rounds `amountIn` down to the input token's World position precision
+  (`1e14` for USDm and `1e15` for wiTRY), and refunds the source-token dust
+  remainder to the Bundler3 initiator when the rounded input is nonzero.
+- Reverts if `amountIn` is below the input token's World position precision.
 - Reverts on zero input, zero minimum output, unsupported pair, expired
   deadline, wrong chain id, wrong router code hash, or invalid receiver.
 - Calls WCM `exactInputSingle` with `fee = 0`, `recipient = address(this)`, and
   `sqrtPriceLimitX96 = 0`.
-- Requires the router to spend exactly `amountIn`.
+- Requires the router to spend exactly the rounded input amount.
 - Requires the bought-token balance delta to be at least `minAmountOut`.
 - Transfers the bought-token delta to `receiver`.
 

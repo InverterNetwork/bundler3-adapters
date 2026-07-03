@@ -44,6 +44,9 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     /// @dev USDm has 4 World position decimals and 18 ERC-20 decimals.
     uint256 internal constant USDM_WORLD_TICK = 1e14;
 
+    /// @dev wiTRY has 3 World position decimals and 18 ERC-20 decimals.
+    uint256 internal constant WITRY_WORLD_TICK = 1e15;
+
     /* CONSTRUCTOR */
 
     /// @param bundler3 The address of the Bundler3 contract.
@@ -93,10 +96,12 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     /* SWAP ACTIONS */
 
     /// @notice Sells an exact input amount through WCM.
-    /// @dev Tokens must have been sent to the adapter before this call.
+    /// @dev Tokens must have been sent to the adapter before this call. `amountIn` is rounded down to the World
+    /// position precision of `tokenIn`, and the source-token dust remainder is refunded to the Bundler3 initiator.
     /// @param tokenIn Token to sell.
     /// @param tokenOut Token to buy.
-    /// @param amountIn Amount of `tokenIn` to sell. Ignored when `sellEntireBalance` is true.
+    /// @param amountIn Maximum amount of `tokenIn` to sell before World precision rounding. Ignored when
+    /// `sellEntireBalance` is true.
     /// @param minAmountOut Minimum acceptable bought amount.
     /// @param sellEntireBalance If true, sells the adapter's full `tokenIn` balance.
     /// @param receiver Address receiving the bought tokens.
@@ -183,10 +188,16 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
     ) internal returns (uint256 spent, uint256 received) {
         _validateSwap(tokenIn, tokenOut, receiver, deadline);
 
+        uint256 swapAmountIn = _roundDownToWorldTick(tokenIn, amountIn);
+        require(swapAmountIn != 0, ErrorsLib.ZeroAmount());
+
+        uint256 dust = amountIn - swapAmountIn;
+        if (dust != 0) SafeERC20.safeTransfer(IERC20(tokenIn), initiator(), dust);
+
         uint256 tokenInBefore = IERC20(tokenIn).balanceOf(address(this));
         uint256 tokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
 
-        SafeERC20.forceApprove(IERC20(tokenIn), address(ROUTER), amountIn);
+        SafeERC20.forceApprove(IERC20(tokenIn), address(ROUTER), swapAmountIn);
 
         ROUTER.exactInputSingle(
             IWcmSwapRouter.ExactInputSingleParams({
@@ -195,7 +206,7 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
                 fee: 0,
                 recipient: address(this),
                 deadline: deadline,
-                amountIn: amountIn,
+                amountIn: swapAmountIn,
                 amountOutMinimum: minAmountOut,
                 sqrtPriceLimitX96: 0
             })
@@ -206,8 +217,8 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         spent = tokenInBefore - IERC20(tokenIn).balanceOf(address(this));
         received = IERC20(tokenOut).balanceOf(address(this)) - tokenOutBefore;
 
-        require(spent <= amountIn, ErrorsLib.SellAmountTooHigh());
-        require(spent == amountIn, ErrorsLib.SellAmountTooLow());
+        require(spent <= swapAmountIn, ErrorsLib.SellAmountTooHigh());
+        require(spent == swapAmountIn, ErrorsLib.SellAmountTooLow());
         require(received >= minAmountOut, ErrorsLib.BuyAmountTooLow());
 
         SafeERC20.safeTransfer(IERC20(tokenOut), receiver, received);
@@ -285,5 +296,10 @@ contract WcmAdapter is CoreAdapter, IWcmAdapter {
         uint256 ticks = amount / USDM_WORLD_TICK;
         if (amount % USDM_WORLD_TICK != 0) ++ticks;
         return ticks * USDM_WORLD_TICK;
+    }
+
+    function _roundDownToWorldTick(address token, uint256 amount) internal view returns (uint256) {
+        uint256 tick = token == USDM ? USDM_WORLD_TICK : WITRY_WORLD_TICK;
+        return amount / tick * tick;
     }
 }

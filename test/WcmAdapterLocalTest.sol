@@ -341,7 +341,8 @@ contract WcmAdapterLocalTest is Test {
     }
 
     function testInvalidRouterCodeHash() public {
-        wcmAdapter = new WcmAdapter(
+        vm.expectRevert(ErrorsLib.InvalidWcmRouter.selector);
+        new WcmAdapter(
             address(bundler3),
             address(morpho),
             address(wcmRouter),
@@ -353,6 +354,10 @@ contract WcmAdapterLocalTest is Test {
             IRM,
             LLTV
         );
+    }
+
+    function testInvalidRouterCodeHashAfterDeployment() public {
+        vm.etch(address(wcmRouter), hex"00");
 
         deal(address(collateralToken), address(wcmAdapter), 1);
 

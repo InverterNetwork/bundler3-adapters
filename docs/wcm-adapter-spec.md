@@ -131,17 +131,35 @@ function buyMorphoDebt(
 ) external;
 ```
 
+### Refund Semantics
+
+For generic `buy`, `receiver` is the beneficiary of the exact-output swap. The
+adapter sends both the bought-token balance delta and the bounded unspent
+source-token refund to `receiver`. Callers should only pass a third-party
+receiver when that address is intended to receive both assets.
+
+`buyMorphoDebt` intentionally separates the bought-token receiver from the
+refund receiver. Bought USDm may be sent to `GeneralAdapter1` for a subsequent
+`morphoRepay`, while any unspent wiTRY is refunded to `onBehalf`, which must be
+the Bundler3 initiator.
+
 ### `sell`
 
 Exact-input swap.
 
 - If `sellEntireBalance` is true, `amountIn` is replaced with the adapter's full
   `tokenIn` balance.
+- Rounds `amountIn` down to the input token's World position precision
+  (`1e14` for USDm and `1e15` for wiTRY), and refunds the source-token dust
+  remainder to the Bundler3 initiator when the rounded input is nonzero.
+- Reverts if `amountIn` is below the input token's World position precision.
 - Reverts on zero input, zero minimum output, unsupported pair, expired
   deadline, wrong chain id, wrong router code hash, or invalid receiver.
+- Requires the adapter's `tokenIn` balance to be at least `amountIn` before
+  refunding dust and calling the router.
 - Calls WCM `exactInputSingle` with `fee = 0`, `recipient = address(this)`, and
   `sqrtPriceLimitX96 = 0`.
-- Requires the router to spend exactly `amountIn`.
+- Requires the router to spend exactly the rounded input amount.
 - Requires the bought-token balance delta to be at least `minAmountOut`.
 - Transfers the bought-token delta to `receiver`.
 
@@ -151,6 +169,8 @@ Exact-output swap.
 
 - Reverts on zero output, zero maximum input, unsupported pair, expired deadline,
   wrong chain id, wrong router code hash, or invalid receiver.
+- Requires the adapter's `tokenIn` balance to be at least `maxAmountIn` before
+  calling the router.
 - Calls WCM `exactOutputSingle` with `fee = 0`, `recipient = address(this)`, and
   `sqrtPriceLimitX96 = 0`.
 - Requires input spent to be at most `maxAmountIn`.

@@ -31,6 +31,9 @@ library ErrorsLib {
     /// @dev Thrown when a call is attempted with a zero amount as input.
     error ZeroAmount();
 
+    /// @dev Thrown when an adapter balance is too low for an action.
+    error InsufficientBalance();
+
     /// @dev Thrown when a call is attempted with a zero shares as input.
     error ZeroShares();
 

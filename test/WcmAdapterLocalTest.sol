@@ -63,6 +63,7 @@ contract WcmAdapterLocalTest is Test {
     address internal constant ORACLE = address(1);
     address internal constant IRM = address(2);
     uint256 internal constant USDM_WORLD_TICK = 1e14;
+    uint256 internal constant WITRY_WORLD_TICK = 1e15;
     uint256 internal constant LLTV = 0.8 ether;
 
     function setUp() public {
@@ -340,7 +341,8 @@ contract WcmAdapterLocalTest is Test {
     }
 
     function testInvalidRouterCodeHash() public {
-        wcmAdapter = new WcmAdapter(
+        vm.expectRevert(ErrorsLib.InvalidWcmRouter.selector);
+        new WcmAdapter(
             address(bundler3),
             address(morpho),
             address(wcmRouter),
@@ -352,6 +354,10 @@ contract WcmAdapterLocalTest is Test {
             IRM,
             LLTV
         );
+    }
+
+    function testInvalidRouterCodeHashAfterDeployment() public {
+        vm.etch(address(wcmRouter), hex"00");
 
         deal(address(collateralToken), address(wcmAdapter), 1);
 
@@ -390,6 +396,79 @@ contract WcmAdapterLocalTest is Test {
         assertEq(loanToken.balanceOf(RECEIVER), amount, "receiver loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
         assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+    }
+
+    function testSellRefundsUsdmDustToInitiator() public {
+        uint256 amount = 10e18 + 1;
+        uint256 roundedAmount = amount / USDM_WORLD_TICK * USDM_WORLD_TICK;
+        uint256 dust = amount - roundedAmount;
+
+        deal(address(loanToken), address(wcmAdapter), amount);
+
+        bundle.push(_wcmSell(address(loanToken), address(collateralToken), amount, roundedAmount, false, RECEIVER));
+
+        bundler3.multicall(bundle);
+
+        assertEq(collateralToken.balanceOf(RECEIVER), roundedAmount, "receiver collateral");
+        assertEq(loanToken.balanceOf(address(this)), dust, "initiator source dust");
+        assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
+        assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
+        assertEq(loanToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+    }
+
+    function testSellRefundsWitryDustToInitiator() public {
+        uint256 amount = 10e18 + 1;
+        uint256 roundedAmount = amount / WITRY_WORLD_TICK * WITRY_WORLD_TICK;
+        uint256 dust = amount - roundedAmount;
+
+        deal(address(collateralToken), address(wcmAdapter), amount);
+
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, roundedAmount, false, RECEIVER));
+
+        bundler3.multicall(bundle);
+
+        assertEq(loanToken.balanceOf(RECEIVER), roundedAmount, "receiver loan");
+        assertEq(collateralToken.balanceOf(address(this)), dust, "initiator source dust");
+        assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
+        assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+    }
+
+    function testSellEntireBalanceRefundsDustToInitiator() public {
+        uint256 amount = 10e18 + 1;
+        uint256 roundedAmount = amount / WITRY_WORLD_TICK * WITRY_WORLD_TICK;
+        uint256 dust = amount - roundedAmount;
+
+        deal(address(collateralToken), address(wcmAdapter), amount);
+
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), 1, roundedAmount, true, RECEIVER));
+
+        bundler3.multicall(bundle);
+
+        assertEq(loanToken.balanceOf(RECEIVER), roundedAmount, "receiver loan");
+        assertEq(collateralToken.balanceOf(address(this)), dust, "initiator source dust");
+        assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+    }
+
+    function testSellUsdmAllDustReverts() public {
+        uint256 amount = USDM_WORLD_TICK - 1;
+
+        deal(address(loanToken), address(wcmAdapter), amount);
+
+        vm.expectRevert(ErrorsLib.ZeroAmount.selector);
+        bundle.push(_wcmSell(address(loanToken), address(collateralToken), amount, 1, false, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
+    function testSellEntireBalanceWitryAllDustReverts() public {
+        uint256 amount = WITRY_WORLD_TICK - 1;
+
+        deal(address(collateralToken), address(wcmAdapter), amount);
+
+        vm.expectRevert(ErrorsLib.ZeroAmount.selector);
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), 1, 1, true, RECEIVER));
+        bundler3.multicall(bundle);
     }
 
     function testBuyForwardsDeltaAndRefundsUnspentSource() public {
@@ -499,6 +578,16 @@ contract WcmAdapterLocalTest is Test {
         bundler3.multicall(bundle);
     }
 
+    function testSellInsufficientBalanceReverts() public {
+        uint256 amount = 10e18;
+
+        deal(address(collateralToken), address(wcmAdapter), amount - 1);
+
+        vm.expectRevert(ErrorsLib.InsufficientBalance.selector);
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, amount, false, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
     function testBuyUnderfillReverts() public {
         uint256 amount = 10e18;
 
@@ -506,6 +595,16 @@ contract WcmAdapterLocalTest is Test {
         wcmRouter.setToGive(amount - 1);
 
         vm.expectRevert(ErrorsLib.BuyAmountTooLow.selector);
+        bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amount, amount, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
+    function testBuyInsufficientBalanceReverts() public {
+        uint256 amount = 10e18;
+
+        deal(address(collateralToken), address(wcmAdapter), amount - 1);
+
+        vm.expectRevert(ErrorsLib.InsufficientBalance.selector);
         bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amount, amount, RECEIVER));
         bundler3.multicall(bundle);
     }

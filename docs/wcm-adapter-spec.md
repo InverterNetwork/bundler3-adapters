@@ -87,7 +87,7 @@ Reference Morpho market for `buyMorphoDebt`:
 MarketParams({
     loanToken:       0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7, // USDm
     collateralToken: 0x15B271D9012b5820FC42b1c495B4C1e206547De5, // wiTRY
-    oracle:          0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22,
+    oracle:          0x5D15337913F6A2C29ecf37Af9E812d81dD77888d,
     irm:             0x56875764185548B0ca72A1877b3aE15E44e8A323,
     lltv:            770000000000000000
 });
@@ -96,8 +96,13 @@ MarketParams({
 Market id:
 
 ```text
-0xa8af4e59ea40a30b6867083a2527109285ee7ab6046b4b49888ade1476272767
+0xa9e57f86cc877f38f2daf080df6638f01afe017eaed59fa3b2f688f6e6d4bf19
 ```
+
+The previous test-market tuple used oracle
+`0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22` and market id
+`0xa8af4e59ea40a30b6867083a2527109285ee7ab6046b4b49888ade1476272767`.
+`buyMorphoDebt` must reject that tuple on a target-market deployment.
 
 ## Public Interface
 

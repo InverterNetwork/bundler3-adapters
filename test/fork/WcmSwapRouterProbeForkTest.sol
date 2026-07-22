@@ -100,15 +100,19 @@ contract WcmSwapRouterProbe {
 }
 
 contract WcmSwapRouterProbeForkTest is Test {
+    uint256 internal constant MEGAETH_CHAIN_ID = 4326;
     address internal constant WORLD_SWAP_ROUTER = 0x94b6706FA26a4F3DCF501Ff25E1e4628B75AdC69;
     address internal constant USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
     address internal constant WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
-    uint256 internal constant FORK_BLOCK = 18_981_853;
+    uint256 internal constant FORK_BLOCK = 21_959_976;
 
     WcmSwapRouterProbe internal probe;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("RPC_URL_4326"), FORK_BLOCK);
+        string memory rpcUrl = vm.envString("RPC_URL_4326");
+        assertEq(vm.parseUint(vm.toString(vm.rpc(rpcUrl, "eth_chainId", "[]"))), MEGAETH_CHAIN_ID, "rpc chain id");
+        vm.createSelectFork(rpcUrl, FORK_BLOCK);
+        vm.chainId(MEGAETH_CHAIN_ID);
         probe = new WcmSwapRouterProbe(WORLD_SWAP_ROUTER);
     }
 

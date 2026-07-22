@@ -66,6 +66,13 @@ contract WcmAdapterLocalTest is Test {
     uint256 internal constant WITRY_WORLD_TICK = 1e15;
     uint256 internal constant LLTV = 0.8 ether;
 
+    address internal constant TARGET_USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
+    address internal constant TARGET_WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
+    address internal constant TARGET_ORACLE = 0x5D15337913F6A2C29ecf37Af9E812d81dD77888d;
+    address internal constant TARGET_IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
+    uint256 internal constant TARGET_LLTV = 770000000000000000;
+    bytes32 internal constant TARGET_MARKET_ID = 0xa9e57f86cc877f38f2daf080df6638f01afe017eaed59fa3b2f688f6e6d4bf19;
+
     function setUp() public {
         bundler3 = new Bundler3();
         loanToken = new ERC20Mock("loan", "B");
@@ -242,6 +249,40 @@ contract WcmAdapterLocalTest is Test {
             rdmAddress,
             rdmAddress,
             LLTV
+        );
+    }
+
+    function testVerifiedTargetTupleHash() public pure {
+        MarketParams memory targetMarket = MarketParams({
+            loanToken: TARGET_USDM,
+            collateralToken: TARGET_WITRY,
+            oracle: TARGET_ORACLE,
+            irm: TARGET_IRM,
+            lltv: TARGET_LLTV
+        });
+
+        assertEq(Id.unwrap(targetMarket.id()), TARGET_MARKET_ID, "target market id");
+    }
+
+    function testAbiSelectorsRemainCompatible() public pure {
+        assertEq(
+            IWcmAdapter.sell.selector,
+            bytes4(keccak256("sell(address,address,uint256,uint256,bool,address,uint256)")),
+            "sell selector"
+        );
+        assertEq(
+            IWcmAdapter.buy.selector,
+            bytes4(keccak256("buy(address,address,uint256,uint256,address,uint256)")),
+            "buy selector"
+        );
+        assertEq(
+            IWcmAdapter.buyMorphoDebt.selector,
+            bytes4(
+                keccak256(
+                    "buyMorphoDebt(address,(address,address,address,address,uint256),uint256,address,address,uint256)"
+                )
+            ),
+            "buyMorphoDebt selector"
         );
     }
 

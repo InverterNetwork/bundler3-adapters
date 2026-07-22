@@ -7,12 +7,13 @@ import {GeneralAdapter1} from "../../src/adapters/GeneralAdapter1.sol";
 import {IWcmAdapter} from "../../src/interfaces/IWcmAdapter.sol";
 import {Bundler3, Call} from "../../src/Bundler3.sol";
 
-import {IMorpho, MarketParams} from "../../lib/morpho-blue/src/interfaces/IMorpho.sol";
+import {Authorization, Id, IMorpho, MarketParams, Signature} from "../../lib/morpho-blue/src/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "../../lib/morpho-blue/src/libraries/MarketParamsLib.sol";
 import {MorphoBalancesLib} from "../../lib/morpho-blue/src/libraries/periphery/MorphoBalancesLib.sol";
 import {IERC20} from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Test} from "../../lib/forge-std/src/Test.sol";
+import {SigUtils} from "../helpers/SigUtils.sol";
 
 contract WcmAdapterFlashLoanForkTest is Test {
     using SafeERC20 for IERC20;
@@ -22,17 +23,19 @@ contract WcmAdapterFlashLoanForkTest is Test {
     address internal constant WORLD_SWAP_ROUTER = 0x94b6706FA26a4F3DCF501Ff25E1e4628B75AdC69;
     address internal constant USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
     address internal constant WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
-    address internal constant ORACLE = 0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22;
+    address internal constant ORACLE = 0x5D15337913F6A2C29ecf37Af9E812d81dD77888d;
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
     bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
         0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
 
     uint256 internal constant LLTV = 770000000000000000;
     uint256 internal constant MEGAETH_CHAIN_ID = 4326;
-    uint256 internal constant FORK_BLOCK = 19_054_909;
+    bytes32 internal constant MARKET_ID = 0xa9e57f86cc877f38f2daf080df6638f01afe017eaed59fa3b2f688f6e6d4bf19;
+    uint256 internal constant FORK_BLOCK = 21_959_976;
 
     address internal lender = makeAddr("lender");
-    address internal borrower = makeAddr("borrower");
+    address internal borrower;
+    uint256 internal borrowerPrivateKey;
     address internal collateralSupplier = makeAddr("collateralSupplier");
 
     Bundler3 internal bundler3;
@@ -41,7 +44,11 @@ contract WcmAdapterFlashLoanForkTest is Test {
     MarketParams internal marketParams;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("RPC_URL_4326"), FORK_BLOCK);
+        string memory rpcUrl = vm.envString("RPC_URL_4326");
+        assertEq(vm.parseUint(vm.toString(vm.rpc(rpcUrl, "eth_chainId", "[]"))), MEGAETH_CHAIN_ID, "rpc chain id");
+        vm.createSelectFork(rpcUrl, FORK_BLOCK);
+        vm.chainId(MEGAETH_CHAIN_ID);
+        (borrower, borrowerPrivateKey) = makeAddrAndKey("borrower");
         assertEq(block.chainid, MEGAETH_CHAIN_ID, "chain id");
         assertEq(WORLD_SWAP_ROUTER.codehash, WORLD_SWAP_ROUTER_CODE_HASH, "router codehash");
 
@@ -61,6 +68,7 @@ contract WcmAdapterFlashLoanForkTest is Test {
         );
 
         marketParams = MarketParams({loanToken: USDM, collateralToken: WITRY, oracle: ORACLE, irm: IRM, lltv: LLTV});
+        assertEq(Id.unwrap(marketParams.id()), MARKET_ID, "target market id");
     }
 
     function testFlashLoanFundedCloseViaBuyMorphoDebt() public {
@@ -177,6 +185,106 @@ contract WcmAdapterFlashLoanForkTest is Test {
         assertEq(IERC20(USDM).allowance(address(wcmAdapter), WORLD_SWAP_ROUTER), 0, "wcm USDm allowance");
     }
 
+    function testSignedAuthorizationCalldataExecutesOpen() public {
+        uint256 initialCollateral = 1000e18;
+        uint256 borrowAmount = 12e18;
+        uint256 minAmountOut = 500e18;
+
+        _supplyLoanLiquidity(200e18);
+        deal(WITRY, borrower, initialCollateral);
+        vm.prank(borrower);
+        IERC20(WITRY).forceApprove(address(generalAdapter1), initialCollateral);
+
+        Call memory signedAuthorization = _morphoSetAuthorizationWithSig();
+        assertEq(
+            bytes4(signedAuthorization.data),
+            bytes4(
+                keccak256("setAuthorizationWithSig((address,address,bool,uint256,uint256),(uint8,bytes32,bytes32))")
+            ),
+            "authorization selector"
+        );
+
+        Call[] memory calls = new Call[](8);
+        calls[0] = signedAuthorization;
+        calls[1] = _erc20TransferFrom(WITRY, address(generalAdapter1), initialCollateral);
+        calls[2] = _morphoSupplyCollateral(initialCollateral, borrower);
+        calls[3] = _morphoBorrow(borrowAmount, address(wcmAdapter));
+        calls[4] = _wcmSell(USDM, WITRY, borrowAmount, minAmountOut, false, address(generalAdapter1));
+        calls[5] = _morphoSupplyCollateral(type(uint256).max, borrower);
+        calls[6] = _erc20Transfer(generalAdapter1, USDM, borrower, type(uint256).max);
+        calls[7] = _erc20Transfer(generalAdapter1, WITRY, borrower, type(uint256).max);
+
+        vm.prank(borrower);
+        bundler3.multicall(calls);
+
+        assertTrue(IMorpho(MORPHO).isAuthorized(borrower, address(generalAdapter1)), "signed authorization");
+        assertGe(MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams, borrower), borrowAmount, "debt");
+        assertGe(
+            IMorpho(MORPHO).position(marketParams.id(), borrower).collateral,
+            initialCollateral + minAmountOut,
+            "collateral"
+        );
+        _assertAdaptersClean();
+    }
+
+    function testLeverUpIncreasesDebtAndCollateral() public {
+        uint256 initialCollateral = 2000e18;
+        uint256 initialBorrow = 12e18;
+        uint256 additionalBorrow = 12e18;
+        uint256 minAmountOut = 500e18;
+
+        _supplyLoanLiquidity(300e18);
+        _createBorrowerPosition(initialCollateral, initialBorrow);
+
+        uint256 debtBefore = MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams, borrower);
+        uint256 collateralBefore = IMorpho(MORPHO).position(marketParams.id(), borrower).collateral;
+
+        Call[] memory calls = new Call[](5);
+        calls[0] = _morphoBorrow(additionalBorrow, address(wcmAdapter));
+        calls[1] = _wcmSell(USDM, WITRY, additionalBorrow, minAmountOut, false, address(generalAdapter1));
+        calls[2] = _morphoSupplyCollateral(type(uint256).max, borrower);
+        calls[3] = _erc20Transfer(wcmAdapter, USDM, borrower, type(uint256).max);
+        calls[4] = _erc20Transfer(generalAdapter1, WITRY, borrower, type(uint256).max);
+
+        vm.prank(borrower);
+        bundler3.multicall(calls);
+
+        assertGt(MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams, borrower), debtBefore, "debt");
+        assertGt(IMorpho(MORPHO).position(marketParams.id(), borrower).collateral, collateralBefore, "collateral");
+        _assertAdaptersClean();
+    }
+
+    function testLeverDownReducesDebtAndCollateral() public {
+        uint256 initialCollateral = 2000e18;
+        uint256 initialBorrow = 24e18;
+        uint256 collateralToSell = 600e18;
+        uint256 debtToRepay = 12e18;
+
+        _supplyLoanLiquidity(200e18);
+        _createBorrowerPosition(initialCollateral, initialBorrow);
+
+        uint256 debtBefore = MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams, borrower);
+        uint256 collateralBefore = IMorpho(MORPHO).position(marketParams.id(), borrower).collateral;
+
+        Call[] memory calls = new Call[](6);
+        calls[0] = _morphoWithdrawCollateral(collateralToSell, address(wcmAdapter));
+        calls[1] = _wcmBuy(WITRY, USDM, debtToRepay, collateralToSell, address(generalAdapter1));
+        calls[2] = _morphoRepayAssets(debtToRepay, borrower);
+        calls[3] = _erc20Transfer(generalAdapter1, USDM, borrower, type(uint256).max);
+        calls[4] = _erc20Transfer(generalAdapter1, WITRY, borrower, type(uint256).max);
+        calls[5] = _erc20Transfer(wcmAdapter, WITRY, borrower, type(uint256).max);
+
+        vm.prank(borrower);
+        bundler3.multicall(calls);
+
+        uint256 debtAfter = MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams, borrower);
+        uint256 collateralAfter = IMorpho(MORPHO).position(marketParams.id(), borrower).collateral;
+        assertGt(debtAfter, 0, "remaining debt");
+        assertLt(debtAfter, debtBefore, "debt");
+        assertEq(collateralAfter, collateralBefore - collateralToSell, "collateral");
+        _assertAdaptersClean();
+    }
+
     function _supplyLoanLiquidity(uint256 assets) internal {
         deal(USDM, lender, assets);
         vm.startPrank(lender);
@@ -206,6 +314,21 @@ contract WcmAdapterFlashLoanForkTest is Test {
     function _authorizeBorrower() internal {
         vm.prank(borrower);
         IMorpho(MORPHO).setAuthorization(address(generalAdapter1), true);
+    }
+
+    function _morphoSetAuthorizationWithSig() internal returns (Call memory) {
+        Authorization memory authorization = Authorization({
+            authorizer: borrower,
+            authorized: address(generalAdapter1),
+            isAuthorized: true,
+            nonce: IMorpho(MORPHO).nonce(borrower),
+            deadline: block.timestamp + 1 hours
+        });
+        bytes32 digest = SigUtils.toTypedDataHash(IMorpho(MORPHO).DOMAIN_SEPARATOR(), authorization);
+        Signature memory signature;
+        (signature.v, signature.r, signature.s) = vm.sign(borrowerPrivateKey, digest);
+
+        return _call(MORPHO, abi.encodeCall(IMorpho(MORPHO).setAuthorizationWithSig, (authorization, signature)));
     }
 
     function _call(address to, bytes memory data) internal pure returns (Call memory) {
@@ -259,6 +382,18 @@ contract WcmAdapterFlashLoanForkTest is Test {
                 GeneralAdapter1.morphoRepay, (marketParams, 0, type(uint256).max, type(uint256).max, onBehalf, hex"")
             )
         );
+    }
+
+    function _morphoRepayAssets(uint256 assets, address onBehalf) internal view returns (Call memory) {
+        return _call(
+            generalAdapter1,
+            abi.encodeCall(GeneralAdapter1.morphoRepay, (marketParams, assets, 0, type(uint256).max, onBehalf, hex""))
+        );
+    }
+
+    function _morphoWithdrawCollateral(uint256 assets, address to) internal view returns (Call memory) {
+        return
+            _call(generalAdapter1, abi.encodeCall(GeneralAdapter1.morphoWithdrawCollateral, (marketParams, assets, to)));
     }
 
     function _morphoWithdrawAllCollateral(address to) internal view returns (Call memory) {

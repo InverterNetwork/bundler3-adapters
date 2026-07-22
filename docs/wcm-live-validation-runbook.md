@@ -32,7 +32,7 @@ Target Morpho market:
 MarketParams({
     loanToken:       0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7, // USDm
     collateralToken: 0x15B271D9012b5820FC42b1c495B4C1e206547De5, // wiTRY
-    oracle:          0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22,
+    oracle:          0x5D15337913F6A2C29ecf37Af9E812d81dD77888d,
     irm:             0x56875764185548B0ca72A1877b3aE15E44e8A323,
     lltv:            770000000000000000
 });
@@ -41,7 +41,7 @@ MarketParams({
 Market id:
 
 ```text
-0xa8af4e59ea40a30b6867083a2527109285ee7ab6046b4b49888ade1476272767
+0xa9e57f86cc877f38f2daf080df6638f01afe017eaed59fa3b2f688f6e6d4bf19
 ```
 
 ## Actors Used By The Live Script
@@ -170,9 +170,15 @@ forge script script/WcmLiveValidation.s.sol:WcmFinalCheckLive \
   --rpc-url "$RPC_URL_4326"
 ```
 
-## Proof Ledger
+## Historical Proof Ledger (Superseded Market)
 
-Hardened adapter validated on June 19, 2026:
+The June 19, 2026 proof below used the former test-market oracle
+`0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22` and market id
+`0xa8af4e59ea40a30b6867083a2527109285ee7ab6046b4b49888ade1476272767`.
+It is retained as historical execution evidence only. Its adapter address and
+runtime code hash must not be used for the target market above.
+
+Hardened adapter historically validated on June 19, 2026:
 
 ```text
 Borrower:              0x40E4471293383e6e38Cb5Ce1E2C2Cd996742Cc0B
@@ -218,6 +224,26 @@ GeneralAdapter1:
   USDm balance: 0
   wiTRY balance: 0
 ```
+
+## Target Deployment Provenance
+
+Before a target-market deployment is accepted, record all of the following in
+this runbook from one canonical `main` commit:
+
+- repository commit and clean-tree status
+- Solidity and Foundry versions plus every git submodule commit
+- creation bytecode hash, constructor arguments and encoded constructor suffix
+- deployed address, deployer, nonce, transaction hash, block and successful receipt
+- runtime bytecode hash and size
+- every immutable getter, including the target oracle, IRM and LLTV
+- independently recomputed target market id and live Morpho `idToMarketParams` tuple
+- World router runtime code hash
+- fork-test and live-validation results
+- final zero USDm/wiTRY balances and zero World-router allowances on both adapters
+
+Do not reuse the historical adapter address or code hash. Update
+`WCM_ADAPTER_CODE_HASH` only from the newly deployed target-market runtime
+bytecode, then review that change before moving funds.
 
 ## Flashloan Fork Proof
 

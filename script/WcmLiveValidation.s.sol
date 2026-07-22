@@ -28,7 +28,8 @@ abstract contract WcmLiveBase is Script {
     address internal constant WORLD_SWAP_ROUTER = 0x94b6706FA26a4F3DCF501Ff25E1e4628B75AdC69;
     address internal constant USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
     address internal constant WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
-    address internal constant ORACLE = 0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22;
+    address internal constant ORACLE = 0x5D15337913F6A2C29ecf37Af9E812d81dD77888d;
+    bytes32 internal constant MARKET_ID = 0xa9e57f86cc877f38f2daf080df6638f01afe017eaed59fa3b2f688f6e6d4bf19;
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
     bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
         0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
@@ -97,7 +98,9 @@ abstract contract WcmLiveBase is Script {
     }
 
     function _marketId() internal pure returns (Id) {
-        return marketParams().id();
+        Id computed = marketParams().id();
+        require(Id.unwrap(computed) == MARKET_ID, "wrong target market id");
+        return computed;
     }
 
     function _quoteExactIn(address tokenIn, address tokenOut, uint256 amountIn, uint256 slippageBps)
@@ -164,6 +167,11 @@ abstract contract WcmLiveBase is Script {
     function _requireMegaEth() internal view {
         require(block.chainid == MEGAETH_CHAIN_ID, "wrong chain");
         require(WORLD_SWAP_ROUTER.codehash == WORLD_SWAP_ROUTER_CODE_HASH, "wrong router codehash");
+        require(
+            keccak256(abi.encode(IMorpho(MORPHO).idToMarketParams(_marketId())))
+                == keccak256(abi.encode(marketParams())),
+            "wrong target market tuple"
+        );
     }
 
     function _wcmAdapterCodeHash() internal pure returns (bytes32) {

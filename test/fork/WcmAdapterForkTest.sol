@@ -6,8 +6,9 @@ import {CoreAdapter} from "../../src/adapters/CoreAdapter.sol";
 import {GeneralAdapter1} from "../../src/adapters/GeneralAdapter1.sol";
 import {IWcmAdapter} from "../../src/interfaces/IWcmAdapter.sol";
 import {Bundler3, Call} from "../../src/Bundler3.sol";
+import {ErrorsLib} from "../../src/libraries/ErrorsLib.sol";
 
-import {IMorpho, MarketParams} from "../../lib/morpho-blue/src/interfaces/IMorpho.sol";
+import {Id, IMorpho, MarketParams} from "../../lib/morpho-blue/src/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "../../lib/morpho-blue/src/libraries/MarketParamsLib.sol";
 import {MorphoBalancesLib} from "../../lib/morpho-blue/src/libraries/periphery/MorphoBalancesLib.sol";
 import {IERC20} from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
@@ -22,14 +23,16 @@ contract WcmAdapterForkTest is Test {
     address internal constant WORLD_SWAP_ROUTER = 0x94b6706FA26a4F3DCF501Ff25E1e4628B75AdC69;
     address internal constant USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
     address internal constant WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
-    address internal constant ORACLE = 0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22;
+    address internal constant ORACLE = 0x5D15337913F6A2C29ecf37Af9E812d81dD77888d;
+    address internal constant OLD_ORACLE = 0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22;
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
     bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
         0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
 
     uint256 internal constant LLTV = 770000000000000000;
     uint256 internal constant MEGAETH_CHAIN_ID = 4326;
-    uint256 internal constant FORK_BLOCK = 18_981_853;
+    bytes32 internal constant MARKET_ID = 0xa9e57f86cc877f38f2daf080df6638f01afe017eaed59fa3b2f688f6e6d4bf19;
+    uint256 internal constant FORK_BLOCK = 21_959_976;
     uint256 internal constant USDM_WORLD_TICK = 1e14;
 
     address internal lender = makeAddr("lender");
@@ -42,7 +45,10 @@ contract WcmAdapterForkTest is Test {
     MarketParams internal marketParams;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("RPC_URL_4326"), FORK_BLOCK);
+        string memory rpcUrl = vm.envString("RPC_URL_4326");
+        assertEq(vm.parseUint(vm.toString(vm.rpc(rpcUrl, "eth_chainId", "[]"))), MEGAETH_CHAIN_ID, "rpc chain id");
+        vm.createSelectFork(rpcUrl, FORK_BLOCK);
+        vm.chainId(MEGAETH_CHAIN_ID);
         assertEq(block.chainid, MEGAETH_CHAIN_ID, "chain id");
         assertEq(WORLD_SWAP_ROUTER.codehash, WORLD_SWAP_ROUTER_CODE_HASH, "router codehash");
 
@@ -62,6 +68,31 @@ contract WcmAdapterForkTest is Test {
         );
 
         marketParams = MarketParams({loanToken: USDM, collateralToken: WITRY, oracle: ORACLE, irm: IRM, lltv: LLTV});
+        assertEq(Id.unwrap(marketParams.id()), MARKET_ID, "target market id");
+    }
+
+    function testTargetMarketTupleMatchesMorphoRegistration() public view {
+        MarketParams memory registered = IMorpho(MORPHO).idToMarketParams(Id.wrap(MARKET_ID));
+
+        assertEq(registered.loanToken, USDM, "loan token");
+        assertEq(registered.collateralToken, WITRY, "collateral token");
+        assertEq(registered.oracle, ORACLE, "oracle");
+        assertEq(registered.irm, IRM, "irm");
+        assertEq(registered.lltv, LLTV, "lltv");
+        assertEq(Id.unwrap(registered.id()), MARKET_ID, "registered market id");
+    }
+
+    function testBuyMorphoDebtRejectsOldMarketTuple() public {
+        MarketParams memory oldMarket =
+            MarketParams({loanToken: USDM, collateralToken: WITRY, oracle: OLD_ORACLE, irm: IRM, lltv: LLTV});
+        deal(WITRY, address(wcmAdapter), 700e18);
+
+        Call[] memory calls = new Call[](1);
+        calls[0] = _wcmBuyMorphoDebt(WITRY, oldMarket, 700e18, borrower, receiver);
+
+        vm.expectRevert(ErrorsLib.InvalidMorphoMarket.selector);
+        vm.prank(borrower);
+        bundler3.multicall(calls);
     }
 
     function testSellThroughWorldRouterForwardsBalanceDelta() public {

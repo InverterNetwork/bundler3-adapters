@@ -339,9 +339,9 @@ RPC_URL_4326=$RPC_URL_4326 forge test --match-contract 'Wcm.*Test' -vvv
 
 Fork blocks are pinned in the tests:
 
-- `WcmAdapterForkTest`: block `18_981_853`
-- `WcmSwapRouterProbeForkTest`: block `18_981_853`
-- `WcmAdapterFlashLoanForkTest`: block `19_054_909`
+- `WcmAdapterForkTest`: block `21_959_976`
+- `WcmSwapRouterProbeForkTest`: block `21_959_976`
+- `WcmAdapterFlashLoanForkTest`: block `21_959_976`
 
 ### CI-Style Full Checks
 
@@ -355,19 +355,22 @@ forge test --chain 8453
 The GitHub formatting workflow also runs a Certora config JSON check. It is not
 WCM-specific and does not require WCM env vars.
 
-## Live Validation
+## Historical Live Validation
 
-The current hardened live proof is documented in
-`docs/wcm-live-validation-runbook.md`.
+The June 19, 2026 live proof documented in
+`docs/wcm-live-validation-runbook.md` used the former test-market oracle
+`0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22` and market id
+`0xa8af4e59ea40a30b6867083a2527109285ee7ab6046b4b49888ade1476272767`.
+It did not validate the target-market tuple specified above.
 
-Current live adapter:
+Historical test-market adapter:
 
 ```text
 WCM adapter:           0x5752E97738Aa65A2a67e704475124453BEceC2Df
 WCM adapter code hash: 0x420c6d7f76359c0c7d0bdfa8261abf00d2e986db45d76881b170d0a5a3e46c9c
 ```
 
-The live run proved:
+For that former test market only, the live run proved:
 
 - `buy`: exact-output `USDm -> wiTRY`
 - `sell`: exact-input `wiTRY -> USDm`
@@ -376,3 +379,8 @@ The live run proved:
 - final zero debt and zero collateral
 - zero WCM/GeneralAdapter1 USDm and wiTRY balances
 - zero WCM router allowances
+
+The historical adapter address and runtime code hash must not be reused for the
+target market. A newly deployed target-market adapter must complete the
+target-specific preflight, fork, deployment-provenance, and live validation
+gates in `docs/wcm-live-validation-runbook.md`.

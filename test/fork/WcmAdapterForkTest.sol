@@ -28,6 +28,7 @@ contract WcmAdapterForkTest is Test {
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
     bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
         0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
+    bytes4 internal constant WORLD_SWAP_SLIPPAGE_ERROR = 0x2256e4c8;
 
     uint256 internal constant LLTV = 770000000000000000;
     uint256 internal constant MEGAETH_CHAIN_ID = 4326;
@@ -193,7 +194,7 @@ contract WcmAdapterForkTest is Test {
         Call[] memory calls = new Call[](1);
         calls[0] = _wcmSell(WITRY, USDM, 600e18, 100e18, false, receiver);
 
-        vm.expectRevert();
+        vm.expectRevert(WORLD_SWAP_SLIPPAGE_ERROR);
         bundler3.multicall(calls);
     }
 
@@ -203,7 +204,7 @@ contract WcmAdapterForkTest is Test {
         Call[] memory calls = new Call[](1);
         calls[0] = _wcmBuy(USDM, WITRY, 600e18, 1e18, receiver);
 
-        vm.expectRevert();
+        vm.expectRevert(WORLD_SWAP_SLIPPAGE_ERROR);
         bundler3.multicall(calls);
     }
 

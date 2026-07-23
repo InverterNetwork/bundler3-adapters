@@ -1,8 +1,10 @@
 # WCM Adapter MegaETH Live Validation Runbook
 
-This runbook documents how to reproduce the live-network validation flow for
-the WCM Bundler3 adapter on MegaETH, and records the successful proof
-transactions for the current PR-head adapter bytecode.
+This runbook documents how to reproduce the target-market live-network
+validation flow for the WCM Bundler3 adapter on MegaETH. Its recorded proof
+transactions are historical evidence from the superseded test-market
+deployment only; they do not validate the current PR-head bytecode or target
+market.
 
 Use the fork tests in `docs/wcm-adapter-spec.md` before running any live
 transaction. Live scripts move real funds.

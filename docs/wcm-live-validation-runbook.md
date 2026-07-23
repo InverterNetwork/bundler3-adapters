@@ -243,6 +243,93 @@ this runbook from one canonical `main` commit:
 - fork-test and live-validation results
 - final zero USDm/wiTRY balances and zero World-router allowances on both adapters
 
+### Target-market deployment record — 2026-07-23
+
+The target-market adapter was deployed from clean canonical `main` after
+fetching both remotes:
+
+```text
+Repository:             InverterNetwork/bundler3-adapters
+Canonical merge:        c7a41c93691e8646021c8de61aed038408799c6f
+Reviewed merge parent:  e256afcd862c80e5a6bdb2c905b2c923df07841d
+Upstream main ancestor: 9afc2f4ea32c9dbeba2205a485731b8a98f7ae4c
+Tree status at signing: clean; HEAD == origin/main
+Forge:                  1.7.1 (4072e48705af9d93e3c0f6e29e93b5e9a40caed8)
+Solc:                   0.8.28+commit.7893614a
+```
+
+Submodule commits:
+
+```text
+lib/forge-std                                                     8f24d6b04c92975e0795b5868aa0d783251cdeaa
+lib/morpho-blue                                                   8fd926254dd21bc6e5bf0ac401202a58f0ffa612
+lib/morpho-blue/lib/forge-std                                     2f112697506eab12d433a65fdc31a639548fe365
+lib/morpho-blue/lib/forge-std/lib/ds-test                         e282159d5170298eb2455a6c05280ab5a73a4ef0
+lib/openzeppelin-contracts                                        49cd64565aafa5b8f6863bf60a30ef015861614c
+lib/openzeppelin-contracts/lib/erc4626-tests                      8b1d7c2ac248c33c3506b1bff8321758943c5e11
+lib/openzeppelin-contracts/lib/forge-std                          8f24d6b04c92975e0795b5868aa0d783251cdeaa
+lib/openzeppelin-contracts/lib/halmos-cheatcodes                  c0d865508c0fee0a11b97732c5e90f9cad6b65a5
+lib/permit2                                                       576f549a7351814f112edcc42f3f8472d1712673
+lib/permit2/lib/forge-gas-snapshot                                3c5d52a26169876a144f7690d2f9ef0200eb0791
+lib/permit2/lib/forge-gas-snapshot/lib/forge-std                  2c7cbfc6fbede6d7c9e6b17afe997e3fdfe22fef
+lib/permit2/lib/forge-gas-snapshot/lib/forge-std/lib/ds-test      9310e879db8ba3ea6d5c6489a579118fd264a3f5
+lib/permit2/lib/forge-std                                         66bf4e2c92cf507531599845e8d5a08cc2e3b5bb
+lib/permit2/lib/forge-std/lib/ds-test                             e282159d5170298eb2455a6c05280ab5a73a4ef0
+lib/permit2/lib/openzeppelin-contracts                            d3ff81b37f3c773b44dcaf5fda212c7176eef0e2
+lib/permit2/lib/solmate                                           8d910d876f51c3b2585c9109409d601f600e68e1
+lib/permit2/lib/solmate/lib/ds-test                               9310e879db8ba3ea6d5c6489a579118fd264a3f5
+```
+
+Reproduced deployment inputs:
+
+```text
+WcmAdapter artifact SHA-256:       9bbd00fc52451074f4d42c84dcf15f63ed2ec8c66d74ea5af986ee235378682b
+Creation bytecode bytes/hash:      10,988 / 0x25e7f8d817a9c9852e6a9426ba01c952b233606ac4f23c3cb2b6c508a4f47238
+Constructor suffix bytes/hash:     320 / 0xf08e43f49f5e446487ea674c5b35c0b04a914776028620f1b6cb85321c39b830
+Full target initcode bytes/hash:    11,308 / 0xf6ebae3a357e6f386c31921a7250cf61c9bd00a54fc93754c7715beb33305328
+Runtime template bytes/hash:       10,281 / 0x0fec972d519d2bdfa842a5338c318c396e84e4b250990d9affced3d4a8393a0e
+Simulated/deployed runtime hash:    0x80b776eae2a28fb16aa05bce7a9d9492df6f9d9dd5493af75070bd22aba9c64c
+```
+
+Creation transaction and finality:
+
+```text
+Deployer:               0x40E4471293383e6e38Cb5Ce1E2C2Cd996742Cc0B
+Deployer nonce:         54
+Predicted/deployed:     0xDef91Fe75e81e6B8D363EEaeD13F9ABAE245Fb76
+Transaction:            0x62e66eff28fcf106f656c162f89e496f5dfb1993fa8c79f63a9cb94edbbe751b
+Block:                  21996422
+Block hash:             0xa8d6aa442a0b0c2745b4f0e8378ae8ef9708ea669202ae1e13c275d9770a288a
+Block timestamp:        1784793433
+Receipt status:         success
+Gas used (`gasUsed`):   106632685
+Cumulative gas used:    106734277
+Effective gas price:    1200000 wei
+Execution fee:          127959222000000 wei
+L1 fee:                 11083164395 wei
+Total fee:              127970305164395 wei
+Finalized checkpoint:   21996652
+Deployer balance after: 5629332970944398 wei
+```
+
+Every immutable getter matched the target constants above: Bundler3, Morpho,
+World router, chain id, router code hash, USDm, wiTRY, oracle, IRM and LLTV.
+Recomputing the market id from those deployed values produced
+`0xa9e57f86cc877f38f2daf080df6638f01afe017eaed59fa3b2f688f6e6d4bf19`.
+
+Post-deployment read-only checks confirmed:
+
+- `nativeTransfer`, `erc20Transfer`, `sell`, `buy` and `buyMorphoDebt` all
+  reject a non-Bundler3 caller with `UnauthorizedSender()`;
+- native, USDm and wiTRY balances are zero;
+- USDm and wiTRY World-router allowances are zero;
+- storage slots 0 through 3 are zero;
+- the finalized runtime is 10,281 bytes and has hash
+  `0x80b776eae2a28fb16aa05bce7a9d9492df6f9d9dd5493af75070bd22aba9c64c`.
+
+The deployment-only step did not update application configuration or
+AWS/DynamoDB, and did not run any live swap, leverage or close operation.
+
 Do not reuse the historical adapter address or code hash. Update
 `WCM_ADAPTER_CODE_HASH` only from the newly deployed target-market runtime
 bytecode, then review that change before moving funds.

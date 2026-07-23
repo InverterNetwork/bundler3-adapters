@@ -34,7 +34,7 @@ abstract contract WcmLiveBase is Script {
     bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
         0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
     bytes32 internal constant WCM_ADAPTER_CODE_HASH =
-        0x420c6d7f76359c0c7d0bdfa8261abf00d2e986db45d76881b170d0a5a3e46c9c;
+        0x80b776eae2a28fb16aa05bce7a9d9492df6f9d9dd5493af75070bd22aba9c64c;
 
     address internal constant BORROWER = 0x40E4471293383e6e38Cb5Ce1E2C2Cd996742Cc0B;
     address internal constant LENDER = 0xa12dC13D9F3bE78E786E8cAd76F6289358448745;

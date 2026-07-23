@@ -94,10 +94,12 @@ contract Erc20PermissionedWrappersForkTest is ForkTest {
 
     function testWbib01BypassFailsWithdrawWithoutPermission(uint256 amount, address initiator) public onlyEthereum {
         vm.assume(initiator != address(0));
+        vm.assume(initiator != WBIB01);
 
         amount = bound(amount, MIN_AMOUNT, MAX_AMOUNT);
 
         IERC20 underlying = ERC20Wrapper(WBIB01).underlying();
+        vm.assume(initiator != address(underlying));
 
         vm.startPrank(initiator);
         IERC20(WBIB01).approve(address(erc20WrapperAdapter), type(uint256).max);
@@ -162,10 +164,12 @@ contract Erc20PermissionedWrappersForkTest is ForkTest {
 
     function testVerUsdcBypassFailsWithdrawWithoutPermission(uint256 amount, address initiator) public onlyBase {
         vm.assume(initiator != address(0));
+        vm.assume(initiator != VER_USDC);
 
         amount = bound(amount, MIN_AMOUNT, MAX_AMOUNT);
 
         IERC20 underlying = ERC20Wrapper(VER_USDC).underlying();
+        vm.assume(initiator != address(underlying));
 
         vm.startPrank(initiator);
         IERC20(VER_USDC).approve(address(erc20WrapperAdapter), type(uint256).max);

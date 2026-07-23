@@ -7,8 +7,10 @@ out/
 /broadcast/*/31337/
 /broadcast/**/dry-run/
 
-# Docs
-docs/
+# WCM docs
+!docs/
+!docs/wcm-adapter-spec.md
+!docs/wcm-live-validation-runbook.md
 
 # Dotenv file
 .env
@@ -24,4 +26,3 @@ broadcast/
 
 # Certora
 .certora_internal
-

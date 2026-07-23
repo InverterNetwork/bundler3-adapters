@@ -31,6 +31,9 @@ library ErrorsLib {
     /// @dev Thrown when a call is attempted with a zero amount as input.
     error ZeroAmount();
 
+    /// @dev Thrown when an adapter balance is too low for an action.
+    error InsufficientBalance();
+
     /// @dev Thrown when a call is attempted with a zero shares as input.
     error ZeroShares();
 
@@ -68,6 +71,26 @@ library ErrorsLib {
     /// @dev Thrown when a swap has spent too many source tokens.
     error SellAmountTooHigh();
 
+    /// @dev Thrown when a swap has spent too few source tokens.
+    error SellAmountTooLow();
+
     /// @dev Thrown when a swap has not bought enough destination tokens.
     error BuyAmountTooLow();
+
+    /* WCM ADAPTER */
+
+    /// @dev Thrown when a WCM swap is attempted on an unsupported token pair.
+    error InvalidWcmPair();
+
+    /// @dev Thrown when WCM Morpho debt is requested for an unsupported market.
+    error InvalidMorphoMarket();
+
+    /// @dev Thrown when a WCM adapter is used on an unsupported chain.
+    error InvalidChainId();
+
+    /// @dev Thrown when the configured WCM router code hash does not match.
+    error InvalidWcmRouter();
+
+    /// @dev Thrown when a WCM swap deadline has passed.
+    error DeadlineExpired();
 }

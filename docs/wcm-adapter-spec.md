@@ -12,23 +12,28 @@ The adapter is intentionally narrow:
 
 - route: `USDm <-> wiTRY`
 - chain: MegaETH, chain id `4326`
-- venue: World Markets / WCM `SwapRouter`
+- venue: World Markets Exchange, price helper, and USDm/wiTRY spot order book
 - Morpho helper market: the USDm/wiTRY Morpho Blue market listed below
 - public actions: `sell`, `buy`, and `buyMorphoDebt`
 
 The adapter does not manage positions by itself. Morpho composition stays in
 `GeneralAdapter1`; WCM-specific responsibilities stay in `WcmAdapter`.
 
+This is a deployment-breaking migration from the former SwapRouter adapter:
+the three public action selectors are unchanged, but the constructor and public
+immutables now identify the Exchange, PriceHelper, order book, and World
+account. Existing router-based deployments and constructor tooling are not
+compatible.
+
 ## Files
 
 - `src/adapters/WcmAdapter.sol`: adapter implementation.
-- `src/interfaces/IWcmAdapter.sol`: adapter and WCM router interfaces.
-- `test/WcmAdapterLocalTest.sol`: local mock-router tests.
+- `src/interfaces/IWcmAdapter.sol`: adapter and WCM Exchange interfaces.
+- `test/WcmAdapterLocalTest.sol`: local mock-exchange tests.
 - `test/fork/WcmAdapterForkTest.sol`: MegaETH fork tests against the deployed
-  World router.
+  World Exchange.
 - `test/fork/WcmAdapterFlashLoanForkTest.sol`: MegaETH fork tests covering WCM
   calls inside Morpho flashloan callback/reenter flows.
-- `test/fork/WcmSwapRouterProbeForkTest.sol`: direct router behavior probes.
 - `script/WcmLiveValidation.s.sol`: live MegaETH validation scripts.
 - `docs/wcm-live-validation-runbook.md`: live execution sequence and proof
   ledger.
@@ -43,11 +48,24 @@ adapters:
 
 - input tokens are pre-sent to the adapter before the swap action
 - every public action has an explicit `receiver`
-- bought-token accounting uses balance deltas, not router return values
-- router approvals are set for the call and cleared immediately afterwards
+- bought-token accounting uses balance deltas, not Exchange return values
+- Exchange approvals are set for the call and cleared immediately afterwards
+- the adapter creates and owns its World account during construction
+- swaps deposit to that account, place fill-all-or-revert spot orders, and
+  withdraw only the balance deltas attributable to the swap
 - no owner, governance, or custom rescue surface is introduced
 - any balance cleanup uses existing `CoreAdapter` transfer helpers through
   Bundler3
+
+Construction calls `World Exchange.createAccount()`, permanently binding the
+new adapter address to its account id and the then-current USDm/wiTRY book. A
+World dependency or book migration requires a new adapter deployment.
+
+The deployed Exchange is an upgradeable proxy. Its proxy code hash is pinned,
+and token ids, position decimals, book mapping, and account ownership are
+revalidated on every swap, but an authorized World implementation upgrade can
+still change behavior. The adapter therefore trusts World governance for
+Exchange upgrades; PriceHelper and order-book runtime hashes remain pinned.
 
 ## Constructor Configuration
 
@@ -57,9 +75,12 @@ Constructor arguments are immutable:
 constructor(
     address bundler3,
     address morpho,
-    address router,
+    address exchange,
+    address priceHelper,
     uint256 chainId,
-    bytes32 routerCodeHash,
+    bytes32 exchangeCodeHash,
+    bytes32 priceHelperCodeHash,
+    bytes32 orderBookCodeHash,
     address usdm,
     address witry,
     address marketOracle,
@@ -75,8 +96,12 @@ chainId:             4326
 Bundler3:            0xf53D4c8f0f83F697CD6bB303567400cCf411aA63
 GeneralAdapter1:     0x74d3cbc721613C8461df92658d0a20dF275Ca31b
 Morpho Blue:         0x18120312A7cf44DcfEc6dCe5632a431579ED9100
-World SwapRouter:    0x94b6706FA26a4F3DCF501Ff25E1e4628B75AdC69
-World router hash:   0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66
+World Exchange:      0x5e3Ae52EbA0F9740364Bd5dd39738e1336086A8b
+World PriceHelper:   0x9DA7FEF3A37536010cF7A0bbDcccE17DF69fE0a6
+World spot book:     0x8214Ca3a606dF76660bC492A6B69CE2570ad82c0
+Exchange hash:       0x7eff9da33cc2042d53428940c03a32662470f639863b356e5cd453b03bb0ce42
+PriceHelper hash:    0xd074b9eedd1b030eba004e8ac12b1487a46f182e71906e243e59ba26490762c6
+Spot-book hash:      0x7d32cc5d85dc003c87165c038c6f49f5ec13ec9bed2f774d00303bf579445b01
 USDm:                0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7
 wiTRY:               0x15B271D9012b5820FC42b1c495B4C1e206547De5
 ```
@@ -159,12 +184,14 @@ Exact-input swap.
   remainder to the Bundler3 initiator when the rounded input is nonzero.
 - Reverts if `amountIn` is below the input token's World position precision.
 - Reverts on zero input, zero minimum output, unsupported pair, expired
-  deadline, wrong chain id, wrong router code hash, or invalid receiver.
+  deadline, wrong chain id, wrong Exchange code hashes, or invalid receiver.
 - Requires the adapter's `tokenIn` balance to be at least `amountIn` before
-  refunding dust and calling the router.
-- Calls WCM `exactInputSingle` with `fee = 0`, `recipient = address(this)`, and
-  `sqrtPriceLimitX96 = 0`.
-- Requires the router to spend exactly the rounded input amount.
+  refunding dust and calling the Exchange.
+- Quotes the fill directly through World `PriceHelper`, deposits the quoted
+  input, and submits a fill-all-or-revert spot order from the adapter's account.
+- Requires the Exchange to spend exactly the rounded input amount.
+- Inputs that World cannot represent as a fully consumed fill-all-or-revert
+  order revert instead of changing exact-input semantics to a partial spend.
 - Requires the bought-token balance delta to be at least `minAmountOut`.
 - Transfers the bought-token delta to `receiver`.
 
@@ -173,11 +200,14 @@ Exact-input swap.
 Exact-output swap.
 
 - Reverts on zero output, zero maximum input, unsupported pair, expired deadline,
-  wrong chain id, wrong router code hash, or invalid receiver.
+  wrong chain id, wrong Exchange code hashes, or invalid receiver.
 - Requires the adapter's `tokenIn` balance to be at least `maxAmountIn` before
-  calling the router.
-- Calls WCM `exactOutputSingle` with `fee = 0`, `recipient = address(this)`, and
-  `sqrtPriceLimitX96 = 0`.
+  calling the Exchange.
+- Quotes the fill directly through World `PriceHelper`; if World lot rounding
+  returns one or more position ticks below the target, the quote request is
+  increased until it covers the requested output.
+- Deposits only the quoted input and submits a fill-all-or-revert spot order
+  from the adapter's account.
 - Requires input spent to be at most `maxAmountIn`.
 - Requires the bought-token balance delta to be at least `amountOut`.
 - Transfers the bought-token delta to `receiver`.
@@ -200,17 +230,27 @@ Exact-output helper for closing or delevering a Morpho position.
   `morphoRepay`.
 - Refunds unspent wiTRY to `onBehalf`, not to `receiver`.
 
-## WCM Router Assumptions
+## WCM Exchange Assumptions
 
-The implementation is based on these verified WCM router behaviors:
+The implementation is based on these verified WCM Exchange behaviors:
 
-- `exactInputSingle` and `exactOutputSingle` use raw ERC-20 units.
-- One side of the pair must be the World base token, USDm for this route.
-- `fee` is ignored.
-- `recipient` is ignored by current router code, so the adapter measures output
-  received by `address(this)` and forwards it by balance delta.
-- `sqrtPriceLimitX96` must be zero.
-- Native ETH is not used for WCM exact-output.
+- `createAccount` binds a World account id to the adapter contract; this is the
+  account World can whitelist for zero maker/taker fees.
+- `depositErc20` and `withdrawErc20` use raw ERC-20 units.
+- `getBalance` also returns raw ERC-20 units, while price-helper and order
+  fields use token position precision (`1e14` USDm, `1e15` wiTRY).
+- The price helper traverses the live book and returns order quantity, input,
+  output, and limit price. It is called transactionally and cleared after every
+  estimate, matching World's integration contract.
+- The helper is also cleared before the first estimate to avoid inheriting any
+  scratch state established earlier in the same transaction.
+- Orders encode fill-all-or-revert type, the adapter's account id, quantity,
+  and limit price, then call `newSpotBuyOrder` or `newSpotSellOrder` directly.
+- The adapter measures World internal balances before and after execution,
+  withdraws attributable output and unspent input, and validates external
+  ERC-20 deltas before forwarding or refunding funds.
+- Available and sequestered balances must return to their pre-order state; a
+  resting or partially sequestered order makes the whole swap revert.
 
 The adapter does not read World minimum order values on-chain. The off-chain
 bundle builder should quote World immediately before execution and choose
@@ -296,6 +336,7 @@ Live scripts, only for real MegaETH execution:
 export RPC_URL_4326=https://rpc.inverter.network/main/evm/4326
 export MEGAETH_TEST_BORROWER_PRIVATE_KEY=<borrower private key>
 export WCM_ADAPTER_ADDRESS=<deployed adapter>
+export WCM_ADAPTER_CODE_HASH=<deployed adapter runtime code hash>
 ```
 
 Optional live-script env vars:
@@ -328,7 +369,6 @@ keywords before `forge fmt --check`. Use plain `forge fmt --check` locally.
 ```bash
 RPC_URL_4326=$RPC_URL_4326 forge test --match-path test/fork/WcmAdapterForkTest.sol -vvv
 RPC_URL_4326=$RPC_URL_4326 forge test --match-path test/fork/WcmAdapterFlashLoanForkTest.sol -vvv
-RPC_URL_4326=$RPC_URL_4326 forge test --match-path test/fork/WcmSwapRouterProbeForkTest.sol -vvv
 ```
 
 Combined WCM-focused run:
@@ -340,7 +380,6 @@ RPC_URL_4326=$RPC_URL_4326 forge test --match-contract 'Wcm.*Test' -vvv
 Fork blocks are pinned in the tests:
 
 - `WcmAdapterForkTest`: block `21_959_976`
-- `WcmSwapRouterProbeForkTest`: block `21_959_976`
 - `WcmAdapterFlashLoanForkTest`: block `21_959_976`
 
 ### CI-Style Full Checks
@@ -378,7 +417,7 @@ For that former test market only, the live run proved:
 - full close via `buyMorphoDebt(wiTRY, ...)`
 - final zero debt and zero collateral
 - zero WCM/GeneralAdapter1 USDm and wiTRY balances
-- zero WCM router allowances
+- zero WCM Exchange allowances
 
 The historical adapter address and runtime code hash must not be reused for the
 target market. A newly deployed target-market adapter must complete the

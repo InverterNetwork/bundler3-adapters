@@ -13,7 +13,7 @@ import {MorphoBalancesLib} from "../lib/morpho-blue/src/libraries/periphery/Morp
 import {MorphoStorageLib} from "../lib/morpho-blue/src/libraries/periphery/MorphoStorageLib.sol";
 
 import {ERC20Mock} from "./helpers/mocks/ERC20Mock.sol";
-import {WcmRouterMock} from "./helpers/mocks/WcmRouterMock.sol";
+import {WcmExchangeMock} from "./helpers/mocks/WcmExchangeMock.sol";
 import "../lib/forge-std/src/Test.sol";
 
 contract MorphoDebtMock {
@@ -54,7 +54,7 @@ contract WcmAdapterLocalTest is Test {
     ERC20Mock internal loanToken;
     ERC20Mock internal collateralToken;
     WcmAdapter internal wcmAdapter;
-    WcmRouterMock internal wcmRouter;
+    WcmExchangeMock internal wcmExchange;
     MorphoDebtMock internal morpho;
     Call[] internal bundle;
 
@@ -78,19 +78,9 @@ contract WcmAdapterLocalTest is Test {
         loanToken = new ERC20Mock("loan", "B");
         collateralToken = new ERC20Mock("collateral", "C");
         morpho = new MorphoDebtMock();
-        wcmRouter = new WcmRouterMock();
-        wcmAdapter = new WcmAdapter(
-            address(bundler3),
-            address(morpho),
-            address(wcmRouter),
-            block.chainid,
-            address(wcmRouter).codehash,
-            address(loanToken),
-            address(collateralToken),
-            ORACLE,
-            IRM,
-            LLTV
-        );
+        wcmExchange = new WcmExchangeMock();
+        wcmExchange.configure(address(loanToken), address(collateralToken));
+        wcmAdapter = _deployAdapter(block.chainid, address(wcmExchange).codehash);
 
         marketParams = MarketParams({
             loanToken: address(loanToken),
@@ -102,154 +92,76 @@ contract WcmAdapterLocalTest is Test {
     }
 
     function testConstructor() public {
-        address rdmAddress = address(1);
-        uint256 chainId = block.chainid;
-        bytes32 routerCodeHash = bytes32(uint256(1));
-
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new WcmAdapter(
             address(0),
-            rdmAddress,
-            rdmAddress,
-            chainId,
-            routerCodeHash,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
+            address(morpho),
+            address(wcmExchange),
+            address(wcmExchange),
+            block.chainid,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
+            address(loanToken),
+            address(collateralToken),
+            ORACLE,
+            IRM,
             LLTV
         );
 
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new WcmAdapter(
-            rdmAddress,
+            address(bundler3),
             address(0),
-            rdmAddress,
-            chainId,
-            routerCodeHash,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
+            address(wcmExchange),
+            address(wcmExchange),
+            block.chainid,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
+            address(loanToken),
+            address(collateralToken),
+            ORACLE,
+            IRM,
             LLTV
         );
 
         vm.expectRevert(ErrorsLib.ZeroAddress.selector);
         new WcmAdapter(
-            rdmAddress,
-            rdmAddress,
+            address(bundler3),
+            address(morpho),
             address(0),
-            chainId,
-            routerCodeHash,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
+            address(wcmExchange),
+            block.chainid,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
+            address(loanToken),
+            address(collateralToken),
+            ORACLE,
+            IRM,
             LLTV
         );
 
         vm.expectRevert(ErrorsLib.ZeroAmount.selector);
         new WcmAdapter(
-            rdmAddress, rdmAddress, rdmAddress, 0, routerCodeHash, rdmAddress, rdmAddress, rdmAddress, rdmAddress, LLTV
-        );
-
-        vm.expectRevert(ErrorsLib.ZeroAmount.selector);
-        new WcmAdapter(
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            chainId,
-            bytes32(0),
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
+            address(bundler3),
+            address(morpho),
+            address(wcmExchange),
+            address(wcmExchange),
+            0,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
+            address(loanToken),
+            address(collateralToken),
+            ORACLE,
+            IRM,
             LLTV
         );
 
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new WcmAdapter(
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            chainId,
-            routerCodeHash,
-            address(0),
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            LLTV
-        );
-
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new WcmAdapter(
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            chainId,
-            routerCodeHash,
-            rdmAddress,
-            address(0),
-            rdmAddress,
-            rdmAddress,
-            LLTV
-        );
-
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new WcmAdapter(
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            chainId,
-            routerCodeHash,
-            rdmAddress,
-            rdmAddress,
-            address(0),
-            rdmAddress,
-            LLTV
-        );
-
-        vm.expectRevert(ErrorsLib.ZeroAddress.selector);
-        new WcmAdapter(
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            chainId,
-            routerCodeHash,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            address(0),
-            LLTV
-        );
-
-        vm.expectRevert(ErrorsLib.ZeroAmount.selector);
-        new WcmAdapter(
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            chainId,
-            routerCodeHash,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            0
-        );
-
-        vm.expectRevert(ErrorsLib.InvalidWcmPair.selector);
-        new WcmAdapter(
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            chainId,
-            routerCodeHash,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            rdmAddress,
-            LLTV
-        );
+        assertEq(wcmAdapter.ACCOUNT_ID(), 1, "account id");
+        assertEq(wcmExchange.getUserId(address(wcmAdapter)), 1, "account owner");
     }
 
     function testVerifiedTargetTupleHash() public pure {
@@ -360,19 +272,28 @@ contract WcmAdapterLocalTest is Test {
         wcmAdapter.sell(address(loanToken), address(loanToken), 1, 1, false, RECEIVER, block.timestamp);
     }
 
+    function testEmptyAskReverts() public {
+        uint256 amount = 10e18;
+        deal(address(loanToken), address(wcmAdapter), amount);
+        wcmExchange.setBestBidOffer(uint256(2) << 128);
+
+        vm.expectRevert(ErrorsLib.InvalidWcmQuote.selector);
+        bundle.push(_wcmSell(address(loanToken), address(collateralToken), amount, 1, false, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
+    function testEmptyBidReverts() public {
+        uint256 amount = 10e18;
+        deal(address(collateralToken), address(wcmAdapter), amount);
+        wcmExchange.setBestBidOffer(2);
+
+        vm.expectRevert(ErrorsLib.InvalidWcmQuote.selector);
+        bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, 1, false, RECEIVER));
+        bundler3.multicall(bundle);
+    }
+
     function testInvalidChainId() public {
-        wcmAdapter = new WcmAdapter(
-            address(bundler3),
-            address(morpho),
-            address(wcmRouter),
-            block.chainid + 1,
-            address(wcmRouter).codehash,
-            address(loanToken),
-            address(collateralToken),
-            ORACLE,
-            IRM,
-            LLTV
-        );
+        wcmAdapter = _deployAdapter(block.chainid + 1, address(wcmExchange).codehash);
 
         deal(address(collateralToken), address(wcmAdapter), 1);
 
@@ -381,13 +302,62 @@ contract WcmAdapterLocalTest is Test {
         bundler3.multicall(bundle);
     }
 
-    function testInvalidRouterCodeHash() public {
-        vm.expectRevert(ErrorsLib.InvalidWcmRouter.selector);
+    function testInvalidExchangeCodeHash() public {
+        vm.expectRevert(ErrorsLib.InvalidWcmExchange.selector);
+        _deployAdapter(block.chainid, bytes32(uint256(1)));
+    }
+
+    function testInvalidPriceHelperCodeHash() public {
+        vm.expectRevert(ErrorsLib.InvalidWcmPriceHelper.selector);
         new WcmAdapter(
             address(bundler3),
             address(morpho),
-            address(wcmRouter),
+            address(wcmExchange),
+            address(wcmExchange),
             block.chainid,
+            address(wcmExchange).codehash,
+            bytes32(uint256(1)),
+            address(wcmExchange).codehash,
+            address(loanToken),
+            address(collateralToken),
+            ORACLE,
+            IRM,
+            LLTV
+        );
+    }
+
+    function testPriceHelperMustHaveCode() public {
+        address noCode = makeAddr("noCode");
+        deal(noCode, 1);
+
+        vm.expectRevert(ErrorsLib.InvalidWcmPriceHelper.selector);
+        new WcmAdapter(
+            address(bundler3),
+            address(morpho),
+            address(wcmExchange),
+            noCode,
+            block.chainid,
+            address(wcmExchange).codehash,
+            noCode.codehash,
+            address(wcmExchange).codehash,
+            address(loanToken),
+            address(collateralToken),
+            ORACLE,
+            IRM,
+            LLTV
+        );
+    }
+
+    function testInvalidOrderBookCodeHash() public {
+        vm.expectRevert(ErrorsLib.InvalidWcmOrderBook.selector);
+        new WcmAdapter(
+            address(bundler3),
+            address(morpho),
+            address(wcmExchange),
+            address(wcmExchange),
+            block.chainid,
+            address(wcmExchange).codehash,
+            address(wcmExchange).codehash,
             bytes32(uint256(1)),
             address(loanToken),
             address(collateralToken),
@@ -397,12 +367,12 @@ contract WcmAdapterLocalTest is Test {
         );
     }
 
-    function testInvalidRouterCodeHashAfterDeployment() public {
-        vm.etch(address(wcmRouter), hex"00");
+    function testInvalidExchangeCodeHashAfterDeployment() public {
+        vm.etch(address(wcmExchange), hex"00");
 
         deal(address(collateralToken), address(wcmAdapter), 1);
 
-        vm.expectRevert(ErrorsLib.InvalidWcmRouter.selector);
+        vm.expectRevert(ErrorsLib.InvalidWcmExchange.selector);
         bundle.push(_wcmSell(address(collateralToken), address(loanToken), 1, 1, false, RECEIVER));
         bundler3.multicall(bundle);
     }
@@ -422,7 +392,7 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.balanceOf(address(this)), extra, "source skim");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
     function testSellEntireBalance() public {
@@ -436,7 +406,7 @@ contract WcmAdapterLocalTest is Test {
 
         assertEq(loanToken.balanceOf(RECEIVER), amount, "receiver loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
     function testSellRefundsUsdmDustToInitiator() public {
@@ -454,7 +424,7 @@ contract WcmAdapterLocalTest is Test {
         assertEq(loanToken.balanceOf(address(this)), dust, "initiator source dust");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
-        assertEq(loanToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(loanToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
     function testSellRefundsWitryDustToInitiator() public {
@@ -472,7 +442,7 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.balanceOf(address(this)), dust, "initiator source dust");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
     function testSellEntireBalanceRefundsDustToInitiator() public {
@@ -489,7 +459,7 @@ contract WcmAdapterLocalTest is Test {
         assertEq(loanToken.balanceOf(RECEIVER), roundedAmount, "receiver loan");
         assertEq(collateralToken.balanceOf(address(this)), dust, "initiator source dust");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
     function testSellUsdmAllDustReverts() public {
@@ -526,7 +496,7 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.balanceOf(RECEIVER), extra, "receiver source refund");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
     function testBuyForwardsDeltaOnlyAndRefundsOnlyUnspentAllowance() public {
@@ -538,7 +508,7 @@ contract WcmAdapterLocalTest is Test {
 
         deal(address(loanToken), address(wcmAdapter), initialOutputDust);
         deal(address(collateralToken), address(wcmAdapter), initialSourceDust + maxAmountIn);
-        wcmRouter.setToTake(spent);
+        wcmExchange.setToTake(spent);
 
         bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amountOut, maxAmountIn, RECEIVER));
 
@@ -548,17 +518,16 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.balanceOf(RECEIVER), maxAmountIn - spent, "receiver bounded source refund");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), initialOutputDust, "adapter output dust");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), initialSourceDust, "adapter source dust");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
-    function testBuyIgnoresRouterReturnForRefundAccounting() public {
+    function testBuyRefundUsesActualExchangeBalanceDelta() public {
         uint256 amountOut = 10e18;
         uint256 spent = 8e18;
         uint256 maxAmountIn = 12e18;
 
         deal(address(collateralToken), address(wcmAdapter), maxAmountIn);
-        wcmRouter.setToTake(spent);
-        wcmRouter.setToReturn(0);
+        wcmExchange.setToTake(spent);
 
         bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amountOut, maxAmountIn, RECEIVER));
 
@@ -589,21 +558,19 @@ contract WcmAdapterLocalTest is Test {
         uint256 amount = 10e18;
 
         deal(address(collateralToken), address(wcmAdapter), amount);
-        wcmRouter.setToGive(amount - 1);
+        wcmExchange.setToGive(amount - 1);
 
         vm.expectRevert(ErrorsLib.BuyAmountTooLow.selector);
         bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, amount, false, RECEIVER));
         bundler3.multicall(bundle);
     }
 
-    function testSellUnderfillRevertsWhenRouterReturnLies() public {
+    function testSequesteredBalanceChangeReverts() public {
         uint256 amount = 10e18;
-
         deal(address(collateralToken), address(wcmAdapter), amount);
-        wcmRouter.setToGive(amount - 1);
-        wcmRouter.setToReturn(amount);
+        wcmExchange.setSequesterOnExecute(true);
 
-        vm.expectRevert(ErrorsLib.BuyAmountTooLow.selector);
+        vm.expectRevert(ErrorsLib.InvalidWcmQuote.selector);
         bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, amount, false, RECEIVER));
         bundler3.multicall(bundle);
     }
@@ -612,7 +579,7 @@ contract WcmAdapterLocalTest is Test {
         uint256 amount = 10e18;
 
         deal(address(collateralToken), address(wcmAdapter), amount);
-        wcmRouter.setToTake(amount - 1);
+        wcmExchange.setToTake(amount - 1);
 
         vm.expectRevert(ErrorsLib.SellAmountTooLow.selector);
         bundle.push(_wcmSell(address(collateralToken), address(loanToken), amount, amount - 1, false, RECEIVER));
@@ -633,9 +600,9 @@ contract WcmAdapterLocalTest is Test {
         uint256 amount = 10e18;
 
         deal(address(collateralToken), address(wcmAdapter), amount);
-        wcmRouter.setToGive(amount - 1);
+        wcmExchange.setToGive(amount - 1);
 
-        vm.expectRevert(ErrorsLib.BuyAmountTooLow.selector);
+        vm.expectRevert(ErrorsLib.InvalidWcmQuote.selector);
         bundle.push(_wcmBuy(address(collateralToken), address(loanToken), amount, amount, RECEIVER));
         bundler3.multicall(bundle);
     }
@@ -711,7 +678,7 @@ contract WcmAdapterLocalTest is Test {
         assertEq(loanToken.balanceOf(RECEIVER), roundedDebt, "receiver loan");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
     function testBuyMorphoDebtRefundsUnspentSourceToOnBehalf() public {
@@ -736,7 +703,7 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.balanceOf(RECEIVER), 0, "receiver source");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), 0, "adapter loan");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), 0, "adapter collateral");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
     }
 
     function testBuyMorphoDebtForwardsDeltaOnlyAndRefundsOnlyUnspentAllowance() public {
@@ -764,7 +731,26 @@ contract WcmAdapterLocalTest is Test {
         assertEq(collateralToken.balanceOf(RECEIVER), 0, "receiver source");
         assertEq(loanToken.balanceOf(address(wcmAdapter)), initialOutputDust, "adapter output dust");
         assertEq(collateralToken.balanceOf(address(wcmAdapter)), initialSourceDust, "adapter source dust");
-        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmRouter)), 0, "router allowance");
+        assertEq(collateralToken.allowance(address(wcmAdapter), address(wcmExchange)), 0, "exchange allowance");
+    }
+
+    function _deployAdapter(uint256 chainId, bytes32 exchangeCodeHash) internal returns (WcmAdapter) {
+        bytes32 helperAndBookCodeHash = address(wcmExchange).codehash;
+        return new WcmAdapter(
+            address(bundler3),
+            address(morpho),
+            address(wcmExchange),
+            address(wcmExchange),
+            chainId,
+            exchangeCodeHash,
+            helperAndBookCodeHash,
+            helperAndBookCodeHash,
+            address(loanToken),
+            address(collateralToken),
+            ORACLE,
+            IRM,
+            LLTV
+        );
     }
 
     function _call(address to, bytes memory data) internal pure returns (Call memory) {

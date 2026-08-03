@@ -82,6 +82,9 @@ Contains the following actions for the MegaETH World Markets / WCM
 - Buy a given amount.
 - Buy the live USDm debt needed to fully repay the pinned Morpho market.
 
+The adapter owns a World account and calls the World Exchange directly, so its
+maker/taker fees can be configured independently of the shared swap router.
+
 See [`docs/wcm-adapter-spec.md`](./docs/wcm-adapter-spec.md) for the adapter
 model, supported deployment, and reproducible WCM validation commands.
 

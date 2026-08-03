@@ -20,15 +20,20 @@ contract WcmAdapterForkTest is Test {
     using MarketParamsLib for MarketParams;
 
     address internal constant MORPHO = 0x18120312A7cf44DcfEc6dCe5632a431579ED9100;
-    address internal constant WORLD_SWAP_ROUTER = 0x94b6706FA26a4F3DCF501Ff25E1e4628B75AdC69;
+    address internal constant WORLD_EXCHANGE = 0x5e3Ae52EbA0F9740364Bd5dd39738e1336086A8b;
+    address internal constant WORLD_PRICE_HELPER = 0x9DA7FEF3A37536010cF7A0bbDcccE17DF69fE0a6;
+    address internal constant WORLD_ORDER_BOOK = 0x8214Ca3a606dF76660bC492A6B69CE2570ad82c0;
     address internal constant USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
     address internal constant WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
     address internal constant ORACLE = 0x5D15337913F6A2C29ecf37Af9E812d81dD77888d;
     address internal constant OLD_ORACLE = 0xEebB019a6C66826f8BA8A583177E0dd5feEd0F22;
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
-    bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
-        0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
-    bytes4 internal constant WORLD_SWAP_SLIPPAGE_ERROR = 0x2256e4c8;
+    bytes32 internal constant WORLD_EXCHANGE_CODE_HASH =
+        0x7eff9da33cc2042d53428940c03a32662470f639863b356e5cd453b03bb0ce42;
+    bytes32 internal constant WORLD_PRICE_HELPER_CODE_HASH =
+        0xd074b9eedd1b030eba004e8ac12b1487a46f182e71906e243e59ba26490762c6;
+    bytes32 internal constant WORLD_ORDER_BOOK_CODE_HASH =
+        0x7d32cc5d85dc003c87165c038c6f49f5ec13ec9bed2f774d00303bf579445b01;
 
     uint256 internal constant LLTV = 770000000000000000;
     uint256 internal constant MEGAETH_CHAIN_ID = 4326;
@@ -51,22 +56,28 @@ contract WcmAdapterForkTest is Test {
         vm.createSelectFork(rpcUrl, FORK_BLOCK);
         vm.chainId(MEGAETH_CHAIN_ID);
         assertEq(block.chainid, MEGAETH_CHAIN_ID, "chain id");
-        assertEq(WORLD_SWAP_ROUTER.codehash, WORLD_SWAP_ROUTER_CODE_HASH, "router codehash");
+        assertEq(WORLD_EXCHANGE.codehash, WORLD_EXCHANGE_CODE_HASH, "exchange codehash");
+        assertEq(WORLD_PRICE_HELPER.codehash, WORLD_PRICE_HELPER_CODE_HASH, "price helper codehash");
+        assertEq(WORLD_ORDER_BOOK.codehash, WORLD_ORDER_BOOK_CODE_HASH, "order book codehash");
 
         bundler3 = new Bundler3();
         generalAdapter1 = new GeneralAdapter1(address(bundler3), MORPHO, address(1));
         wcmAdapter = new WcmAdapter(
             address(bundler3),
             MORPHO,
-            WORLD_SWAP_ROUTER,
+            WORLD_EXCHANGE,
+            WORLD_PRICE_HELPER,
             MEGAETH_CHAIN_ID,
-            WORLD_SWAP_ROUTER_CODE_HASH,
+            WORLD_EXCHANGE_CODE_HASH,
+            WORLD_PRICE_HELPER_CODE_HASH,
+            WORLD_ORDER_BOOK_CODE_HASH,
             USDM,
             WITRY,
             ORACLE,
             IRM,
             LLTV
         );
+        assertEq(wcmAdapter.EXCHANGE().getUserId(address(wcmAdapter)), wcmAdapter.ACCOUNT_ID(), "World account");
 
         marketParams = MarketParams({loanToken: USDM, collateralToken: WITRY, oracle: ORACLE, irm: IRM, lltv: LLTV});
         assertEq(Id.unwrap(marketParams.id()), MARKET_ID, "target market id");
@@ -96,7 +107,7 @@ contract WcmAdapterForkTest is Test {
         bundler3.multicall(calls);
     }
 
-    function testSellThroughWorldRouterForwardsBalanceDelta() public {
+    function testSellThroughWorldExchangeForwardsBalanceDelta() public {
         uint256 amountIn = 600e18;
         uint256 minAmountOut = 12e18;
 
@@ -112,10 +123,11 @@ contract WcmAdapterForkTest is Test {
         assertGe(received, minAmountOut, "receiver USDm delta");
         assertEq(IERC20(USDM).balanceOf(address(wcmAdapter)), 0, "adapter USDm");
         assertEq(IERC20(WITRY).balanceOf(address(wcmAdapter)), 0, "adapter wiTRY");
-        assertEq(IERC20(WITRY).allowance(address(wcmAdapter), WORLD_SWAP_ROUTER), 0, "router allowance");
+        assertEq(IERC20(WITRY).allowance(address(wcmAdapter), WORLD_EXCHANGE), 0, "exchange allowance");
+        _assertWorldAccountClean();
     }
 
-    function testBuyThroughWorldRouterForwardsBalanceDelta() public {
+    function testBuyThroughWorldExchangeForwardsBalanceDelta() public {
         uint256 amountOut = 600e18;
         uint256 maxAmountIn = 15e18;
 
@@ -132,10 +144,11 @@ contract WcmAdapterForkTest is Test {
         assertGe(received, amountOut, "receiver wiTRY delta");
         assertEq(IERC20(WITRY).balanceOf(address(wcmAdapter)), 0, "adapter wiTRY");
         assertEq(IERC20(USDM).balanceOf(address(wcmAdapter)), 0, "adapter USDm");
-        assertEq(IERC20(USDM).allowance(address(wcmAdapter), WORLD_SWAP_ROUTER), 0, "router allowance");
+        assertEq(IERC20(USDM).allowance(address(wcmAdapter), WORLD_EXCHANGE), 0, "exchange allowance");
+        _assertWorldAccountClean();
     }
 
-    function testBuyMorphoDebtThroughWorldRouterForwardsRoundedDebt() public {
+    function testBuyMorphoDebtThroughWorldExchangeForwardsRoundedDebt() public {
         _createFreshMorphoPosition();
 
         uint256 debt = MorphoBalancesLib.expectedBorrowAssets(IMorpho(MORPHO), marketParams, borrower);
@@ -159,7 +172,8 @@ contract WcmAdapterForkTest is Test {
         assertGe(received, roundedDebt, "receiver USDm delta");
         assertEq(IERC20(USDM).balanceOf(address(wcmAdapter)), 0, "adapter USDm");
         assertEq(IERC20(WITRY).balanceOf(address(wcmAdapter)), 0, "adapter wiTRY");
-        assertEq(IERC20(WITRY).allowance(address(wcmAdapter), WORLD_SWAP_ROUTER), 0, "router allowance");
+        assertEq(IERC20(WITRY).allowance(address(wcmAdapter), WORLD_EXCHANGE), 0, "exchange allowance");
+        _assertWorldAccountClean();
     }
 
     function testBuyMorphoDebtCanFundMorphoRepay() public {
@@ -185,26 +199,27 @@ contract WcmAdapterForkTest is Test {
         assertEq(IERC20(WITRY).balanceOf(address(wcmAdapter)), 0, "adapter wiTRY");
         assertEq(IERC20(USDM).balanceOf(address(generalAdapter1)), 0, "general adapter USDm");
         assertEq(IERC20(WITRY).balanceOf(address(generalAdapter1)), 0, "general adapter wiTRY");
-        assertEq(IERC20(WITRY).allowance(address(wcmAdapter), WORLD_SWAP_ROUTER), 0, "router allowance");
+        assertEq(IERC20(WITRY).allowance(address(wcmAdapter), WORLD_EXCHANGE), 0, "exchange allowance");
+        _assertWorldAccountClean();
     }
 
-    function testSellUnderfillRevertsThroughWorldRouter() public {
+    function testSellUnderfillRevertsThroughWorldExchange() public {
         deal(WITRY, address(wcmAdapter), 600e18);
 
         Call[] memory calls = new Call[](1);
         calls[0] = _wcmSell(WITRY, USDM, 600e18, 100e18, false, receiver);
 
-        vm.expectRevert(WORLD_SWAP_SLIPPAGE_ERROR);
+        vm.expectRevert(ErrorsLib.BuyAmountTooLow.selector);
         bundler3.multicall(calls);
     }
 
-    function testBuyMaxSpendRevertsThroughWorldRouter() public {
+    function testBuyMaxSpendRevertsThroughWorldExchange() public {
         deal(USDM, address(wcmAdapter), 1e18);
 
         Call[] memory calls = new Call[](1);
         calls[0] = _wcmBuy(USDM, WITRY, 600e18, 1e18, receiver);
 
-        vm.expectRevert(WORLD_SWAP_SLIPPAGE_ERROR);
+        vm.expectRevert(ErrorsLib.SellAmountTooHigh.selector);
         bundler3.multicall(calls);
     }
 
@@ -304,5 +319,16 @@ contract WcmAdapterForkTest is Test {
         uint256 ticks = amount / USDM_WORLD_TICK;
         if (amount % USDM_WORLD_TICK != 0) ++ticks;
         return ticks * USDM_WORLD_TICK;
+    }
+
+    function _assertWorldAccountClean() internal view {
+        (uint128 usdmBalance, uint128 usdmSequestered) =
+            wcmAdapter.EXCHANGE().getBalance(wcmAdapter.ACCOUNT_ID(), wcmAdapter.USDM_TOKEN_ID());
+        (uint128 witryBalance, uint128 witrySequestered) =
+            wcmAdapter.EXCHANGE().getBalance(wcmAdapter.ACCOUNT_ID(), wcmAdapter.WITRY_TOKEN_ID());
+        assertEq(usdmBalance, 0, "World USDm balance");
+        assertEq(usdmSequestered, 0, "World USDm sequestered");
+        assertEq(witryBalance, 0, "World wiTRY balance");
+        assertEq(witrySequestered, 0, "World wiTRY sequestered");
     }
 }

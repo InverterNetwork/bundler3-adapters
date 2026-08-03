@@ -88,8 +88,20 @@ library ErrorsLib {
     /// @dev Thrown when a WCM adapter is used on an unsupported chain.
     error InvalidChainId();
 
-    /// @dev Thrown when the configured WCM router code hash does not match.
-    error InvalidWcmRouter();
+    /// @dev Thrown when the configured WCM exchange code hash does not match.
+    error InvalidWcmExchange();
+
+    /// @dev Thrown when the configured WCM price-helper code hash does not match.
+    error InvalidWcmPriceHelper();
+
+    /// @dev Thrown when the configured WCM order book is invalid.
+    error InvalidWcmOrderBook();
+
+    /// @dev Thrown when the adapter's WCM exchange account is invalid.
+    error InvalidWcmAccount();
+
+    /// @dev Thrown when WCM cannot produce a complete executable quote.
+    error InvalidWcmQuote();
 
     /// @dev Thrown when a WCM swap deadline has passed.
     error DeadlineExpired();

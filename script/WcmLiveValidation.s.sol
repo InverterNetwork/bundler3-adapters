@@ -7,17 +7,12 @@ import {Bundler3, Call} from "../src/Bundler3.sol";
 import {CoreAdapter} from "../src/adapters/CoreAdapter.sol";
 import {GeneralAdapter1} from "../src/adapters/GeneralAdapter1.sol";
 import {WcmAdapter} from "../src/adapters/WcmAdapter.sol";
-import {IWcmAdapter} from "../src/interfaces/IWcmAdapter.sol";
+import {IWcmAdapter, IWcmPriceHelper, IWcmSpotOrderBook} from "../src/interfaces/IWcmAdapter.sol";
 
 import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {IMorpho, MarketParams, Id, Position} from "../lib/morpho-blue/src/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "../lib/morpho-blue/src/libraries/MarketParamsLib.sol";
 import {MorphoBalancesLib} from "../lib/morpho-blue/src/libraries/periphery/MorphoBalancesLib.sol";
-
-interface IWcmQuoteRouter {
-    function priceByAmountIn(uint256 orderParams) external returns (uint256);
-    function priceByAmountOut(uint256 orderParams) external returns (uint256);
-}
 
 abstract contract WcmLiveBase is Script {
     using MarketParamsLib for MarketParams;
@@ -25,16 +20,20 @@ abstract contract WcmLiveBase is Script {
     address internal constant BUNDLER3 = 0xf53D4c8f0f83F697CD6bB303567400cCf411aA63;
     address internal constant GENERAL_ADAPTER1 = 0x74d3cbc721613C8461df92658d0a20dF275Ca31b;
     address internal constant MORPHO = 0x18120312A7cf44DcfEc6dCe5632a431579ED9100;
-    address internal constant WORLD_SWAP_ROUTER = 0x94b6706FA26a4F3DCF501Ff25E1e4628B75AdC69;
+    address internal constant WORLD_EXCHANGE = 0x5e3Ae52EbA0F9740364Bd5dd39738e1336086A8b;
+    address internal constant WORLD_PRICE_HELPER = 0x9DA7FEF3A37536010cF7A0bbDcccE17DF69fE0a6;
+    address internal constant WORLD_ORDER_BOOK = 0x8214Ca3a606dF76660bC492A6B69CE2570ad82c0;
     address internal constant USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
     address internal constant WITRY = 0x15B271D9012b5820FC42b1c495B4C1e206547De5;
     address internal constant ORACLE = 0x5D15337913F6A2C29ecf37Af9E812d81dD77888d;
     bytes32 internal constant MARKET_ID = 0xa9e57f86cc877f38f2daf080df6638f01afe017eaed59fa3b2f688f6e6d4bf19;
     address internal constant IRM = 0x56875764185548B0ca72A1877b3aE15E44e8A323;
-    bytes32 internal constant WORLD_SWAP_ROUTER_CODE_HASH =
-        0x4fd3bfa5a8737b3e7411a83d8968153870956c17e0caac728dbfdc3399ba8a66;
-    bytes32 internal constant WCM_ADAPTER_CODE_HASH =
-        0x80b776eae2a28fb16aa05bce7a9d9492df6f9d9dd5493af75070bd22aba9c64c;
+    bytes32 internal constant WORLD_EXCHANGE_CODE_HASH =
+        0x7eff9da33cc2042d53428940c03a32662470f639863b356e5cd453b03bb0ce42;
+    bytes32 internal constant WORLD_PRICE_HELPER_CODE_HASH =
+        0xd074b9eedd1b030eba004e8ac12b1487a46f182e71906e243e59ba26490762c6;
+    bytes32 internal constant WORLD_ORDER_BOOK_CODE_HASH =
+        0x7d32cc5d85dc003c87165c038c6f49f5ec13ec9bed2f774d00303bf579445b01;
 
     address internal constant BORROWER = 0x40E4471293383e6e38Cb5Ce1E2C2Cd996742Cc0B;
     address internal constant LENDER = 0xa12dC13D9F3bE78E786E8cAd76F6289358448745;
@@ -47,7 +46,10 @@ abstract contract WcmLiveBase is Script {
     uint256 internal constant USDM_POSITION_SCALE = 1e14;
     uint256 internal constant WITRY_POSITION_SCALE = 1e15;
     uint256 internal constant BPS = 10_000;
-    uint32 internal constant WITRY_TOKEN_ID = 9;
+    uint8 internal constant PRICE_TYPE_SELL_IN = 1;
+    uint8 internal constant PRICE_TYPE_BUY_OUT = 2;
+    uint8 internal constant PRICE_TYPE_SELL_OUT = 3;
+    uint8 internal constant PRICE_TYPE_BUY_IN = 4;
     uint256 internal constant MEGAETH_CHAIN_ID = 4326;
     uint256 internal constant DEFAULT_DEADLINE_TTL = 2 minutes;
     uint256 internal constant MAX_DEADLINE_TTL = 5 minutes;
@@ -113,9 +115,7 @@ abstract contract WcmLiveBase is Script {
         uint256 inputScale = tokenIn == USDM ? USDM_POSITION_SCALE : WITRY_POSITION_SCALE;
         uint256 outputScale = tokenOut == USDM ? USDM_POSITION_SCALE : WITRY_POSITION_SCALE;
         uint64 amountInPosition = _toPositionAmount(amountIn, inputScale);
-        uint256 quote = IWcmQuoteRouter(WORLD_SWAP_ROUTER)
-            .priceByAmountIn(_packSwapInputAmountIn(amountInPosition, 0, type(uint64).max, WITRY_TOKEN_ID, isBuy));
-        uint64 amountOutPosition = uint64(quote >> 64);
+        (, uint64 amountOutPosition) = _worldQuote(true, isBuy, amountInPosition, 0);
         require(amountOutPosition != 0, "zero exact-in quote");
 
         uint256 minOutPosition = uint256(amountOutPosition) * (BPS - slippageBps) / BPS;
@@ -133,11 +133,7 @@ abstract contract WcmLiveBase is Script {
         uint256 inputScale = tokenIn == USDM ? USDM_POSITION_SCALE : WITRY_POSITION_SCALE;
         uint256 outputScale = tokenOut == USDM ? USDM_POSITION_SCALE : WITRY_POSITION_SCALE;
         uint64 amountOutPosition = _toPositionAmountUp(amountOut, outputScale);
-        uint256 quote = IWcmQuoteRouter(WORLD_SWAP_ROUTER)
-            .priceByAmountOut(
-                _packSwapInputAmountOut(amountOutPosition, type(uint64).max, type(uint64).max, WITRY_TOKEN_ID, isBuy)
-            );
-        uint64 amountInPosition = uint64(quote >> 128);
+        (uint64 amountInPosition,) = _worldQuote(false, isBuy, type(uint64).max, amountOutPosition);
         require(amountInPosition != 0, "zero exact-out quote");
 
         uint256 maxInPosition = _mulDivUp(uint256(amountInPosition), BPS + slippageBps, BPS);
@@ -166,7 +162,9 @@ abstract contract WcmLiveBase is Script {
 
     function _requireMegaEth() internal view {
         require(block.chainid == MEGAETH_CHAIN_ID, "wrong chain");
-        require(WORLD_SWAP_ROUTER.codehash == WORLD_SWAP_ROUTER_CODE_HASH, "wrong router codehash");
+        require(WORLD_EXCHANGE.codehash == WORLD_EXCHANGE_CODE_HASH, "wrong exchange codehash");
+        require(WORLD_PRICE_HELPER.codehash == WORLD_PRICE_HELPER_CODE_HASH, "wrong price helper codehash");
+        require(WORLD_ORDER_BOOK.codehash == WORLD_ORDER_BOOK_CODE_HASH, "wrong order book codehash");
         require(
             keccak256(abi.encode(IMorpho(MORPHO).idToMarketParams(_marketId())))
                 == keccak256(abi.encode(marketParams())),
@@ -174,8 +172,10 @@ abstract contract WcmLiveBase is Script {
         );
     }
 
-    function _wcmAdapterCodeHash() internal pure returns (bytes32) {
-        return WCM_ADAPTER_CODE_HASH;
+    function _wcmAdapterCodeHash() internal view returns (bytes32) {
+        bytes32 expected = vm.envBytes32("WCM_ADAPTER_CODE_HASH");
+        require(expected != bytes32(0), "missing WCM_ADAPTER_CODE_HASH");
+        return expected;
     }
 
     function _validateWcmAdapter(address adapter, bytes32 expectedCodeHash) internal view {
@@ -189,11 +189,21 @@ abstract contract WcmLiveBase is Script {
         WcmAdapter wcmAdapter = WcmAdapter(payable(adapter));
         require(wcmAdapter.BUNDLER3() == BUNDLER3, "wrong adapter bundler");
         require(address(wcmAdapter.MORPHO()) == MORPHO, "wrong adapter morpho");
-        require(address(wcmAdapter.ROUTER()) == WORLD_SWAP_ROUTER, "wrong adapter router");
+        require(address(wcmAdapter.EXCHANGE()) == WORLD_EXCHANGE, "wrong adapter exchange");
+        require(address(wcmAdapter.PRICE_HELPER()) == WORLD_PRICE_HELPER, "wrong adapter price helper");
+        require(address(wcmAdapter.ORDER_BOOK()) == WORLD_ORDER_BOOK, "wrong adapter order book");
         require(wcmAdapter.CHAIN_ID() == MEGAETH_CHAIN_ID, "wrong adapter chainid");
-        require(wcmAdapter.ROUTER_CODE_HASH() == WORLD_SWAP_ROUTER_CODE_HASH, "wrong adapter router codehash");
+        require(wcmAdapter.EXCHANGE_CODE_HASH() == WORLD_EXCHANGE_CODE_HASH, "wrong adapter exchange codehash");
+        require(
+            wcmAdapter.PRICE_HELPER_CODE_HASH() == WORLD_PRICE_HELPER_CODE_HASH, "wrong adapter price helper codehash"
+        );
+        require(wcmAdapter.ORDER_BOOK_CODE_HASH() == WORLD_ORDER_BOOK_CODE_HASH, "wrong adapter book codehash");
         require(wcmAdapter.USDM() == USDM, "wrong adapter usdm");
         require(wcmAdapter.WITRY() == WITRY, "wrong adapter witry");
+        require(wcmAdapter.USDM_TOKEN_ID() == 1, "wrong adapter usdm token id");
+        require(wcmAdapter.WITRY_TOKEN_ID() == 9, "wrong adapter witry token id");
+        require(wcmAdapter.ACCOUNT_ID() != 0, "missing adapter World account");
+        require(wcmAdapter.EXCHANGE().getUserId(adapter) == wcmAdapter.ACCOUNT_ID(), "wrong adapter World account");
         require(wcmAdapter.MARKET_ORACLE() == ORACLE, "wrong adapter oracle");
         require(wcmAdapter.MARKET_IRM() == IRM, "wrong adapter irm");
         require(wcmAdapter.MARKET_LLTV() == LLTV, "wrong adapter lltv");
@@ -213,22 +223,37 @@ abstract contract WcmLiveBase is Script {
         require(IERC20(token).approve(GENERAL_ADAPTER1, amount), label);
     }
 
-    function _packSwapInputAmountIn(uint64 amountIn, uint64 amountOutMin, uint64 deadline, uint32 tokenId, bool isBuy)
+    function _worldQuote(bool exactIn, bool isBuy, uint64 amountIn, uint64 requiredAmountOut)
         internal
-        pure
-        returns (uint256 packed)
+        returns (uint64 quotedAmountIn, uint64 quotedAmountOut)
     {
-        packed = uint256(amountIn) | (uint256(amountOutMin) << 64) | (uint256(deadline) << 128)
-            | (uint256(tokenId) << 192) | (uint256(isBuy ? 1 : 0) << 224);
-    }
+        uint8 priceType = exactIn
+            ? (isBuy ? PRICE_TYPE_BUY_IN : PRICE_TYPE_SELL_IN)
+            : (isBuy ? PRICE_TYPE_BUY_OUT : PRICE_TYPE_SELL_OUT);
+        uint256 bestBidOffer = IWcmSpotOrderBook(WORLD_ORDER_BOOK).bestBidOffer();
+        uint64 bestPrice = isBuy ? uint64(bestBidOffer) : uint64(bestBidOffer >> 128);
+        require(bestPrice != 0 && bestPrice != type(uint64).max, "empty World book");
+        uint64 startPrice = isBuy ? bestPrice - 1 : bestPrice + 1;
+        uint64 requestedAmountOut = requiredAmountOut;
 
-    function _packSwapInputAmountOut(uint64 amountOut, uint64 amountInMax, uint64 deadline, uint32 tokenId, bool isBuy)
-        internal
-        pure
-        returns (uint256 packed)
-    {
-        packed = uint256(amountOut) | (uint256(amountInMax) << 64) | (uint256(deadline) << 128)
-            | (uint256(tokenId) << 192) | (uint256(isBuy ? 1 : 0) << 224);
+        uint256[] memory batch = new uint256[](2);
+        batch[0] = (uint256(priceType) << 160) | uint160(WORLD_ORDER_BOOK);
+        IWcmPriceHelper(WORLD_PRICE_HELPER).clear();
+        for (uint256 i; i < 4; ++i) {
+            batch[1] = (uint256(amountIn) << 128) | (uint256(requestedAmountOut) << 64) | startPrice;
+            uint256[] memory results = IWcmPriceHelper(WORLD_PRICE_HELPER).estimatePrices(WORLD_EXCHANGE, batch);
+            IWcmPriceHelper(WORLD_PRICE_HELPER).clear();
+            require(results.length == 1, "invalid World quote length");
+            quotedAmountIn = uint64(results[0] >> 128);
+            quotedAmountOut = uint64(results[0] >> 64);
+            require(quotedAmountIn != 0 && quotedAmountOut != 0, "invalid World quote");
+            if (exactIn || quotedAmountOut >= requiredAmountOut) return (quotedAmountIn, quotedAmountOut);
+
+            uint256 nextRequest = uint256(requestedAmountOut) + requiredAmountOut - quotedAmountOut;
+            require(nextRequest <= type(uint64).max, "World quote overflow");
+            requestedAmountOut = uint64(nextRequest);
+        }
+        revert("World exact-output underfill");
     }
 
     function _mulDivUp(uint256 x, uint256 y, uint256 d) internal pure returns (uint256) {
@@ -340,8 +365,8 @@ abstract contract WcmLiveBase is Script {
         console2.log("WCM adapter", wcmAdapter);
         console2.log("  USDm balance", IERC20(USDM).balanceOf(wcmAdapter));
         console2.log("  wiTRY balance", IERC20(WITRY).balanceOf(wcmAdapter));
-        console2.log("  USDm router allowance", IERC20(USDM).allowance(wcmAdapter, WORLD_SWAP_ROUTER));
-        console2.log("  wiTRY router allowance", IERC20(WITRY).allowance(wcmAdapter, WORLD_SWAP_ROUTER));
+        console2.log("  USDm exchange allowance", IERC20(USDM).allowance(wcmAdapter, WORLD_EXCHANGE));
+        console2.log("  wiTRY exchange allowance", IERC20(WITRY).allowance(wcmAdapter, WORLD_EXCHANGE));
         console2.log("GeneralAdapter1");
         console2.log("  USDm balance", IERC20(USDM).balanceOf(GENERAL_ADAPTER1));
         console2.log("  wiTRY balance", IERC20(WITRY).balanceOf(GENERAL_ADAPTER1));
@@ -350,8 +375,8 @@ abstract contract WcmLiveBase is Script {
     function _assertWcmClean(address wcmAdapter) internal view {
         require(IERC20(USDM).balanceOf(wcmAdapter) == 0, "wcm usdm stranded");
         require(IERC20(WITRY).balanceOf(wcmAdapter) == 0, "wcm witry stranded");
-        require(IERC20(USDM).allowance(wcmAdapter, WORLD_SWAP_ROUTER) == 0, "wcm usdm approval");
-        require(IERC20(WITRY).allowance(wcmAdapter, WORLD_SWAP_ROUTER) == 0, "wcm witry approval");
+        require(IERC20(USDM).allowance(wcmAdapter, WORLD_EXCHANGE) == 0, "wcm usdm approval");
+        require(IERC20(WITRY).allowance(wcmAdapter, WORLD_EXCHANGE) == 0, "wcm witry approval");
     }
 
     function _assertGeneralAdapterClean() internal view {
@@ -386,9 +411,12 @@ contract WcmDeployLive is WcmLiveBase {
         WcmAdapter adapter = new WcmAdapter(
             BUNDLER3,
             MORPHO,
-            WORLD_SWAP_ROUTER,
+            WORLD_EXCHANGE,
+            WORLD_PRICE_HELPER,
             MEGAETH_CHAIN_ID,
-            WORLD_SWAP_ROUTER_CODE_HASH,
+            WORLD_EXCHANGE_CODE_HASH,
+            WORLD_PRICE_HELPER_CODE_HASH,
+            WORLD_ORDER_BOOK_CODE_HASH,
             USDM,
             WITRY,
             ORACLE,
